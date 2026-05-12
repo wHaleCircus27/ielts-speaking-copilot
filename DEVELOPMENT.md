@@ -53,6 +53,33 @@ API keys are no longer saved in browser localStorage. In the Tauri desktop shell
 
 Provider requests still use the frontend facade, but real HTTP calls now prefer `@tauri-apps/plugin-http` in the desktop shell. Web-only development can still use Mock provider without API keys or network. The Tauri HTTP permission scope is limited to OpenAI, Groq, Gemini, and NVIDIA endpoints.
 
+LLM model selection is provider-specific and rendered as a dropdown. NVIDIA options are curated from the NVIDIA API Catalog `/v1/models` response and include verified IDs such as `meta/llama-3.3-70b-instruct`, `nvidia/nemotron-3-super-120b-a12b`, and `openai/gpt-oss-120b`. If a stored setting contains an older custom model ID, the app normalizes it back to the provider default so generation uses a known model option.
+
+## 2026-05-12 Development Sync
+
+Completed:
+
+- Added provider-specific LLM model dropdowns for Mock, OpenAI, Groq, Gemini, and NVIDIA.
+- Added strict model normalization so older custom model strings are not kept as active dropdown values.
+- Updated NVIDIA connection testing to call the same OpenAI-compatible chat completions endpoint used by feedback generation, with the currently selected model.
+- Verified the provided NVIDIA API key against `https://integrate.api.nvidia.com/v1/chat/completions` without logging or committing the key.
+- Verified all curated NVIDIA dropdown models with a minimal non-streaming chat completion request.
+- Verified NVIDIA streaming chat completion with `meta/llama-3.3-70b-instruct`.
+
+Passed:
+
+- `npm.cmd run test`
+- `npm.cmd run typecheck`
+- `npm.cmd run build`
+- `cargo check`
+- NVIDIA live smoke test for `/v1/chat/completions` with the provided key and curated dropdown models.
+
+Not yet completed:
+
+- Full Tauri desktop manual walkthrough after the latest connection-test change.
+- Real ASR provider validation with OpenAI/Groq keys.
+- Real OpenAI/Groq/Gemini LLM validation beyond unit-level endpoint selection.
+
 ## Next Engineering Steps
 
 1. Run `npm.cmd run dev` to manually verify the web UI with Mock provider.

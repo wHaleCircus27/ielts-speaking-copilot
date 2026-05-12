@@ -1,0 +1,51 @@
+import type { LlmProvider } from './types';
+
+export type ModelOption = {
+  label: string;
+  value: string;
+};
+
+export const llmModelOptions: Record<LlmProvider, ModelOption[]> = {
+  mock: [{ label: 'Mock feedback', value: 'mock-feedback' }],
+  openai: [
+    { label: 'GPT-4o mini', value: 'gpt-4o-mini' },
+    { label: 'GPT-4o', value: 'gpt-4o' },
+    { label: 'GPT-4.1 mini', value: 'gpt-4.1-mini' },
+    { label: 'GPT-4.1', value: 'gpt-4.1' }
+  ],
+  groq: [
+    { label: 'Llama 3.3 70B Versatile', value: 'llama-3.3-70b-versatile' },
+    { label: 'Llama 3.1 8B Instant', value: 'llama-3.1-8b-instant' },
+    { label: 'Mixtral 8x7B', value: 'mixtral-8x7b-32768' },
+    { label: 'Gemma 2 9B', value: 'gemma2-9b-it' }
+  ],
+  gemini: [
+    { label: 'Gemini 2.5 Flash', value: 'gemini-2.5-flash' },
+    { label: 'Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
+    { label: 'Gemini 2.0 Flash', value: 'gemini-2.0-flash' },
+    { label: 'Gemini 1.5 Flash', value: 'gemini-1.5-flash' }
+  ],
+  nvidia: [
+    { label: 'Llama 3.3 70B Instruct', value: 'meta/llama-3.3-70b-instruct' },
+    { label: 'Llama 4 Maverick 17B 128E', value: 'meta/llama-4-maverick-17b-128e-instruct' },
+    { label: 'Nemotron Super 49B v1.5', value: 'nvidia/llama-3.3-nemotron-super-49b-v1.5' },
+    { label: 'Nemotron Super 120B A12B', value: 'nvidia/nemotron-3-super-120b-a12b' },
+    { label: 'Mistral Large 3 675B', value: 'mistralai/mistral-large-3-675b-instruct-2512' },
+    { label: 'DeepSeek V4 Pro', value: 'deepseek-ai/deepseek-v4-pro' },
+    { label: 'DeepSeek V4 Flash', value: 'deepseek-ai/deepseek-v4-flash' },
+    { label: 'GPT OSS 120B', value: 'openai/gpt-oss-120b' },
+    { label: 'GPT OSS 20B', value: 'openai/gpt-oss-20b' }
+  ]
+};
+
+export function getDefaultLlmModel(provider: LlmProvider): string {
+  return llmModelOptions[provider][0].value;
+}
+
+export function getLlmModelOptions(provider: LlmProvider, currentModel: string): ModelOption[] {
+  return llmModelOptions[provider];
+}
+
+export function isKnownLlmModel(provider: LlmProvider, model: string): boolean {
+  return llmModelOptions[provider].some((option) => option.value === model.trim());
+}

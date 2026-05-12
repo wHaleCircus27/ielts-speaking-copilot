@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { normalizeTranscriptionResponse, parseSseEvent, readErrorMessage, ProviderError } from './providers';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  normalizeTranscriptionResponse,
+  parseSseEvent,
+  readErrorMessage,
+  ProviderError,
+  testLlmProviderConnection
+} from './providers';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('normalizeTranscriptionResponse', () => {
   it('normalizes timestamped provider segments', () => {
@@ -48,5 +58,25 @@ describe('readErrorMessage', () => {
     const message = await readErrorMessage(response);
     expect(message).toContain('401');
     expect(message).toContain('bad key');
+  });
+});
+
+describe('testLlmProviderConnection', () => {
+  it('checks the selected NVIDIA model through chat completions', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+
+    await testLlmProviderConnection('nvidia', 'nvapi-test', 'meta/llama-3.3-70b-instruct');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://integrate.api.nvidia.com/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer nvapi-test',
+          'Content-Type': 'application/json'
+        }),
+        body: expect.stringContaining('meta/llama-3.3-70b-instruct')
+      })
+    );
   });
 });

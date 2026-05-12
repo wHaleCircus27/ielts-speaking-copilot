@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "dev:tauri": "next dev --hostname 127.0.0.1 --port 3000",
     "build": "next build",
     "test": "vitest run",
     "test:watch": "vitest",

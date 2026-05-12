@@ -8,9 +8,11 @@ import {
   getProviderLabel,
   needsLlmKey,
   streamFeedback,
+  testLlmProviderConnection,
   transcribeAudio
 } from '@/lib/providers';
 import { findActiveSegmentId, seekPlayerToSegment } from '@/lib/playback';
+import { getDefaultLlmModel, getLlmModelOptions, isKnownLlmModel } from '@/lib/model-options';
 import { defaultSettings, loadSettings, saveSettings } from '@/lib/storage';
 import type { AppSettings, FeedbackDraft, JobStatus, LlmProvider, MediaJob, TranscriptSegment } from '@/lib/types';
 
@@ -18,14 +20,6 @@ type AppPage = 'workspace' | 'settings';
 type Lang = AppSettings['appearance']['language'];
 
 const acceptedTypes = ['audio/', 'video/'];
-
-const defaultLlmModels: Record<LlmProvider, string> = {
-  mock: 'mock-feedback',
-  openai: 'gpt-4o-mini',
-  groq: 'llama-3.3-70b-versatile',
-  gemini: 'gemini-2.5-flash',
-  nvidia: 'meta/llama-3.3-70b-instruct'
-};
 
 const fontOptions = [
   { label: 'Inter / System', value: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' },
@@ -263,23 +257,6 @@ function getTextScale(size: AppSettings['appearance']['fontSize']): string {
   }[size];
 }
 
-function buildProviderTestRequest(provider: Exclude<LlmProvider, 'mock'>, apiKey: string): RequestInfo | URL {
-  if (provider === 'gemini') {
-    return `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
-  }
-
-  if (provider === 'nvidia') {
-    return new Request('https://integrate.api.nvidia.com/v1/models', {
-      headers: { Authorization: `Bearer ${apiKey}` }
-    });
-  }
-
-  const endpoint = provider === 'groq' ? 'https://api.groq.com/openai/v1/models' : 'https://api.openai.com/v1/models';
-  return new Request(endpoint, {
-    headers: { Authorization: `Bearer ${apiKey}` }
-  });
-}
-
 export default function Home() {
   const playerRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -308,8 +285,14 @@ export default function Home() {
     let cancelled = false;
     void loadSettings().then((loaded) => {
       if (cancelled) return;
-      setSettings(loaded);
-      setMessage(copy[loaded.appearance.language].initialMessage);
+      const normalized = isKnownLlmModel(loaded.llmProvider, loaded.llmModel)
+        ? loaded
+        : { ...loaded, llmModel: getDefaultLlmModel(loaded.llmProvider) };
+      setSettings(normalized);
+      if (normalized !== loaded) {
+        void saveSettings(normalized);
+      }
+      setMessage(copy[normalized.appearance.language].initialMessage);
     });
     return () => {
       cancelled = true;
@@ -341,7 +324,7 @@ export default function Home() {
   }
 
   function handleLlmProviderChange(provider: LlmProvider) {
-    updateSettings((current) => ({ ...current, llmProvider: provider, llmModel: defaultLlmModels[provider] }));
+    updateSettings((current) => ({ ...current, llmProvider: provider, llmModel: getDefaultLlmModel(provider) }));
   }
 
   function handleApiKeyChange(provider: keyof AppSettings['apiKeys'], value: string) {
@@ -379,11 +362,7 @@ export default function Home() {
 
     setIsTestingConnection(true);
     try {
-      const response = await fetch(buildProviderTestRequest(provider, apiKey));
-      if (!response.ok) {
-        window.alert(t.testFail(providerLabel, `${response.status} ${response.statusText || ''}`.trim()));
-        return;
-      }
+      await testLlmProviderConnection(provider, apiKey, settings.llmModel);
       window.alert(t.testOk(providerLabel));
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Unknown error';
@@ -841,6 +820,7 @@ function SettingsView(props: SettingsProps) {
   const selectedProvider = props.settings.llmProvider;
   const selectedProviderLabel = getProviderLabel(selectedProvider);
   const selectedApiKey = selectedProvider === 'mock' ? '' : props.settings.apiKeys[selectedProvider];
+  const modelOptions = getLlmModelOptions(selectedProvider, props.settings.llmModel);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar lg:p-6">
@@ -908,7 +888,11 @@ function SettingsView(props: SettingsProps) {
               </select>
             </Field>
             <Field label={props.t.llmModel}>
-              <input className="glass-input" value={props.settings.llmModel} onChange={(event) => props.handleSettingsChange('llmModel', event.target.value)} />
+              <select className="glass-input" value={props.settings.llmModel} onChange={(event) => props.handleSettingsChange('llmModel', event.target.value)}>
+                {modelOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </Field>
             {selectedProvider !== 'mock' ? (
               <Field label={props.t.apiKeyFor(selectedProviderLabel)} wide>

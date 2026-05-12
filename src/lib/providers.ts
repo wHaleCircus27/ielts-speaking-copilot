@@ -93,6 +93,65 @@ export async function* streamFeedback(
   yield* streamGeminiFeedback(segments, settings);
 }
 
+export async function testLlmProviderConnection(
+  provider: Exclude<LlmProvider, 'mock'>,
+  apiKey: string,
+  model: string
+): Promise<void> {
+  const key = apiKey.trim();
+  if (!key) {
+    throw new ProviderError(`请先填写 ${getProviderLabel(provider)} API Key。`);
+  }
+
+  assertModel(model, 'LLM');
+
+  if (provider === 'gemini') {
+    const encodedModel = encodeURIComponent(model.trim());
+    const response = await safeFetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodedModel}:generateContent?key=${encodeURIComponent(key)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Reply with ok only.' }] }],
+          generationConfig: { maxOutputTokens: 4, temperature: 0 }
+        })
+      }
+    );
+    if (!response.ok) {
+      throw new ProviderError(await readErrorMessage(response));
+    }
+    await response.text();
+    return;
+  }
+
+  const endpoint =
+    provider === 'groq'
+      ? 'https://api.groq.com/openai/v1/chat/completions'
+      : provider === 'nvidia'
+        ? 'https://integrate.api.nvidia.com/v1/chat/completions'
+        : 'https://api.openai.com/v1/chat/completions';
+  const response = await safeFetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: model.trim(),
+      messages: [{ role: 'user', content: 'Reply with ok only.' }],
+      max_tokens: 4,
+      temperature: 0,
+      stream: false
+    })
+  });
+
+  if (!response.ok) {
+    throw new ProviderError(await readErrorMessage(response));
+  }
+  await response.text();
+}
+
 async function transcribeWithOpenAi(file: File, settings: AppSettings): Promise<TranscriptSegment[]> {
   const response = await postTranscription('https://api.openai.com/v1/audio/transcriptions', file, {
     apiKey: settings.apiKeys.openai,
