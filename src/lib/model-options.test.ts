@@ -15,14 +15,17 @@ describe('asr model options', () => {
     expect(getDefaultAsrModel('mock')).toBe('mock-transcript');
     expect(getDefaultAsrModel('openai')).toBe('gpt-4o-mini-transcribe');
     expect(getDefaultAsrModel('groq')).toBe('whisper-large-v3-turbo');
+    expect(getDefaultAsrModel('nvidia')).toBe('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning');
   });
 
   it('keeps ASR model selection constrained to known provider options', () => {
     const values = asrModelOptions.openai.map((option) => option.value);
     expect(values).toContain('gpt-4o-mini-transcribe');
     expect(getAsrModelOptions('groq').map((option) => option.value)).toContain('whisper-large-v3');
+    expect(getAsrModelOptions('nvidia').map((option) => option.value)).toContain('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning');
     expect(isKnownAsrModel('openai', 'gpt-4o-mini-transcribe')).toBe(true);
     expect(isKnownAsrModel('openai', 'whisper-large-v3')).toBe(false);
+    expect(isKnownAsrModel('nvidia', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning')).toBe(true);
   });
 });
 

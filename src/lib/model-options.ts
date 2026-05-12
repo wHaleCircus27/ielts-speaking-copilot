@@ -49,6 +49,9 @@ export const asrModelOptions: Record<AsrProvider, ModelOption[]> = {
     { label: 'Whisper Large v3 Turbo', value: 'whisper-large-v3-turbo' },
     { label: 'Whisper Large v3', value: 'whisper-large-v3' },
     { label: 'Distil Whisper Large v3 EN', value: 'distil-whisper-large-v3-en' }
+  ],
+  nvidia: [
+    { label: 'Nemotron 3 Nano Omni 30B', value: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning' }
   ]
 };
 

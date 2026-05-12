@@ -92,7 +92,7 @@ const copy = {
     themeColor: '主题颜色',
     language: '界面语言',
     providerSettings: 'Provider Settings',
-    providerHelp: '分别配置 ASR 与 LLM。OpenAI/Groq 的 ASR 和 LLM 会共用对应 provider 的 API Key。',
+    providerHelp: '分别配置 ASR 与 LLM。OpenAI、Groq、NVIDIA 的 ASR 和 LLM 会共用对应 provider 的 API Key。',
     asrProvider: 'ASR 提供商',
     asrModel: 'ASR 模型',
     llmProvider: 'LLM 提供商',
@@ -186,7 +186,7 @@ const copy = {
     themeColor: 'Theme color',
     language: 'Interface language',
     providerSettings: 'Provider Settings',
-    providerHelp: 'Configure ASR and LLM separately. OpenAI/Groq ASR and LLM share that provider API key.',
+    providerHelp: 'Configure ASR and LLM separately. OpenAI, Groq, and NVIDIA ASR/LLM share that provider API key.',
     asrProvider: 'ASR Provider',
     asrModel: 'ASR Model',
     llmProvider: 'LLM Provider',
@@ -934,6 +934,7 @@ function SettingsView(props: SettingsProps) {
                 <option value="mock">Mock</option>
                 <option value="openai">OpenAI</option>
                 <option value="groq">Groq</option>
+                <option value="nvidia">NVIDIA</option>
               </select>
             </Field>
             <Field label={props.t.asrModel}>

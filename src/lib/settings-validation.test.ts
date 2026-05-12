@@ -43,6 +43,17 @@ describe('settings readiness', () => {
     expect(readiness.ready).toBe(false);
   });
 
+  it('requires NVIDIA API key before NVIDIA ASR transcription', () => {
+    const readiness = getSettingsReadiness(settingsWith({
+      asrProvider: 'nvidia',
+      asrModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '' }
+    }));
+
+    expect(readiness.asr.ready).toBe(false);
+    expect(readiness.asr.missing).toEqual(['NVIDIA API Key']);
+  });
+
   it('requires LLM model and provider API key before feedback generation', () => {
     const readiness = getSettingsReadiness(settingsWith({
       llmProvider: 'gemini',

@@ -14,7 +14,7 @@ export type TranscriptSegment = {
   text: string;
 };
 
-export type AsrProvider = 'mock' | 'openai' | 'groq';
+export type AsrProvider = 'mock' | 'openai' | 'groq' | 'nvidia';
 
 export type LlmProvider = 'mock' | 'openai' | 'groq' | 'gemini' | 'nvidia';
 

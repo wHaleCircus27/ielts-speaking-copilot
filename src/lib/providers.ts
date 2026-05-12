@@ -56,7 +56,11 @@ export async function transcribeAudio(
     return transcribeWithOpenAi(file, settings);
   }
 
-  return transcribeWithGroq(file, settings);
+  if (settings.asrProvider === 'groq') {
+    return transcribeWithGroq(file, settings);
+  }
+
+  return transcribeWithNvidia(file, settings, duration);
 }
 
 export async function* streamFeedback(
@@ -168,6 +172,50 @@ async function transcribeWithGroq(file: File, settings: AppSettings): Promise<Tr
   });
 
   return normalizeTranscriptionResponse(response);
+}
+
+async function transcribeWithNvidia(
+  file: File,
+  settings: AppSettings,
+  duration: number | null
+): Promise<TranscriptSegment[]> {
+  const audioData = await fileToBase64(file);
+  const mimeType = file.type || 'audio/wav';
+  const response = await safeFetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${settings.apiKeys.nvidia.trim()}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: settings.asrModel,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text:
+                'Transcribe this IELTS speaking homework audio. Return only the spoken transcript text. Do not add commentary, markdown, timestamps, or labels.'
+            },
+            {
+              type: 'audio_url',
+              audio_url: {
+                url: `data:${mimeType};base64,${audioData}`
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 4096,
+      temperature: 0,
+      stream: false
+    })
+  });
+
+  const data = (await readJsonResponse(response)) as JsonRecord;
+  const text = extractChatCompletionText(data);
+  return normalizeNvidiaTranscriptionText(text, duration);
 }
 
 async function postTranscription(
@@ -380,6 +428,45 @@ export function normalizeTranscriptionResponse(response: unknown): TranscriptSeg
   throw new ProviderError('ASR 返回为空，未能生成可用转录。');
 }
 
+export function normalizeNvidiaTranscriptionText(text: string, duration: number | null): TranscriptSegment[] {
+  const cleaned = text
+    .replace(/^transcript\s*:\s*/i, '')
+    .replace(/^spoken transcript\s*:\s*/i, '')
+    .trim();
+
+  if (!cleaned) {
+    throw new ProviderError('NVIDIA ASR 返回为空，未能生成可用转录。');
+  }
+
+  return [
+    {
+      id: 'segment-1',
+      start: 0,
+      end: duration && Number.isFinite(duration) ? duration : 0,
+      text: cleaned
+    }
+  ];
+}
+
+function extractChatCompletionText(data: JsonRecord): string {
+  const choice = asArray(data.choices)[0] as JsonRecord | undefined;
+  const message = choice?.message as JsonRecord | undefined;
+  const content = message?.content;
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => ((part as JsonRecord).text))
+      .filter((text): text is string => typeof text === 'string')
+      .join('');
+  }
+
+  return '';
+}
+
 function normalizeSegment(segment: JsonRecord, index: number): TranscriptSegment | null {
   const text = typeof segment.text === 'string' ? segment.text.trim() : '';
   if (!text) {
@@ -454,6 +541,18 @@ async function readJsonResponse(response: Response): Promise<unknown> {
   } catch {
     throw new ProviderError('Provider 返回了无法解析的 JSON。');
   }
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+
+  return btoa(binary);
 }
 
 async function fetchWithTauri(input: RequestInfo | URL, init: RequestInit): Promise<Response | null> {

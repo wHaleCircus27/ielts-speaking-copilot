@@ -143,8 +143,8 @@ V0.1 不实现以下功能：
 
 ## 7. AI Provider 需求
 
-- V0.1 默认支持至少一个 ASR provider 和一个 LLM provider。
-- ASR provider 必须能返回时间戳信息，或通过响应内容可靠转换出片段时间。
+- V0.1 默认支持至少一个 ASR provider 和一个 LLM provider。真实 ASR provider 包括 OpenAI、Groq、NVIDIA。
+- ASR provider 必须能返回时间戳信息，或通过响应内容可靠转换出片段时间。V0.1 允许 NVIDIA ASR 先以整段媒体时长生成单个 `TranscriptSegment`，作为真实转写可用但非精细时间戳的 fallback。
 - LLM provider 必须支持普通响应；优先支持 streaming。
 - Provider 层需要抽象接口，避免业务 UI 直接绑定某一家 API。
 - 网络失败、认证失败、余额不足、模型不存在、文件过大等错误应转换为用户可读提示。
