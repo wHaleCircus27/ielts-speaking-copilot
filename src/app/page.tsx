@@ -4,26 +4,28 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatBytes, formatTime } from '@/lib/format';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
+  generateFeedbackDraft,
   getProviderLabel,
-  streamFeedback,
   testLlmProviderConnection,
   transcribeAudio
 } from '@/lib/providers';
+import { buildReviewRecord, deleteReview, listReviews, loadReview, saveReview, searchReviews, toMediaJob } from '@/lib/history';
 import { findActiveSegmentId, seekPlayerToSegment } from '@/lib/playback';
+import { formatBand, scorecardMetricLabels } from '@/lib/scorecard';
 import {
   getAsrModelOptions,
   getDefaultAsrModel,
   getDefaultLlmModel,
   getLlmModelOptions,
   isKnownAsrModel,
-  isKnownLlmModel
+  normalizeLlmModel
 } from '@/lib/model-options';
 import { describeMissingConfig, getSettingsReadiness } from '@/lib/settings-validation';
 import { defaultSettings, loadSettings, saveSettings } from '@/lib/storage';
 import type { SettingsReadiness } from '@/lib/settings-validation';
-import type { AppSettings, AsrProvider, FeedbackDraft, JobStatus, LlmProvider, MediaJob, TranscriptSegment } from '@/lib/types';
+import type { AppSettings, AsrProvider, FeedbackDraft, JobStatus, LlmProvider, MediaJob, ReviewJobRecord, ReviewJobSummary, Scorecard, ScorecardMetricKey, TranscriptSegment } from '@/lib/types';
 
-type AppPage = 'workspace' | 'settings';
+type AppPage = 'workspace' | 'history' | 'settings';
 type Lang = AppSettings['appearance']['language'];
 
 const acceptedTypes = ['audio/', 'video/'];
@@ -77,13 +79,33 @@ const copy = {
     chooseAgain: '重新选择',
     transcription: 'AI Transcription',
     transcriptionHelp: '点击片段可跳转并播放对应时间。',
+    editTranscript: '编辑转录',
+    edited: '已编辑',
+    regenerateWithTranscript: '用当前转录重新生成',
     pendingTranscription: 'Content pending transcription',
     critique: 'AI Critique',
     critiqueHelp: '生成后可直接编辑，复制以当前文本为准。',
+    scorecard: 'IELTS 评分表',
+    scorecardHelp: 'Band 使用 0.1 粒度；证据和建议来自当前转录。',
+    noScorecard: '生成反馈后会显示四项评分。',
+    evidence: '依据',
+    suggestion: '建议',
+    overallBand: '总分',
     generateFeedback: '生成反馈',
     generatingButton: '生成中...',
     copy: '复制',
     copied: '已复制',
+    history: '历史记录',
+    historySubtitle: 'Local review history',
+    historyHelp: '保存文本结果和元信息，不保存原始音视频文件。',
+    searchHistory: '搜索文件名、日期、转录或反馈',
+    emptyHistory: '暂无历史记录',
+    openReview: '打开',
+    deleteReview: '删除',
+    savedMessage: '历史记录已保存。',
+    loadedReviewMessage: '已打开历史记录。若需复听，请重新选择原媒体文件。',
+    deletedReviewMessage: '历史记录已删除。',
+    noMediaInHistory: '历史记录不保存原始媒体文件。需要复听时请重新选择原文件。',
     feedbackPlaceholder: 'AI 反馈会显示在这里。你可以在生成后直接编辑最终版本。',
     appearance: 'Appearance',
     appearanceHelp: '调整工作台的字体、字号、主题色和界面语言。',
@@ -171,13 +193,33 @@ const copy = {
     chooseAgain: 'Choose again',
     transcription: 'AI Transcription',
     transcriptionHelp: 'Click a segment to seek and play that timestamp.',
+    editTranscript: 'Edit transcript',
+    edited: 'Edited',
+    regenerateWithTranscript: 'Regenerate from current transcript',
     pendingTranscription: 'Content pending transcription',
     critique: 'AI Critique',
     critiqueHelp: 'Generated feedback is editable; copy uses the current text.',
+    scorecard: 'IELTS Scorecard',
+    scorecardHelp: 'Bands use 0.1 precision; evidence and suggestions use the current transcript.',
+    noScorecard: 'The four IELTS criteria appear after feedback generation.',
+    evidence: 'Evidence',
+    suggestion: 'Suggestion',
+    overallBand: 'Overall',
     generateFeedback: 'Generate feedback',
     generatingButton: 'Generating...',
     copy: 'Copy',
     copied: 'Copied',
+    history: 'History',
+    historySubtitle: 'Local review history',
+    historyHelp: 'Stores text results and metadata, not original audio/video files.',
+    searchHistory: 'Search file name, date, transcript, or feedback',
+    emptyHistory: 'No review history yet',
+    openReview: 'Open',
+    deleteReview: 'Delete',
+    savedMessage: 'Review history saved.',
+    loadedReviewMessage: 'Review opened. Re-select the original media file if playback is needed.',
+    deletedReviewMessage: 'Review deleted.',
+    noMediaInHistory: 'History does not store original media. Re-select the file to replay it.',
     feedbackPlaceholder: 'AI feedback appears here. You can edit the final version after generation.',
     appearance: 'Appearance',
     appearanceHelp: 'Adjust font, font size, theme color, and interface language.',
@@ -243,6 +285,7 @@ const copy = {
 type Copy = typeof copy.zh;
 
 function createJob(file: File): MediaJob {
+  const now = new Date().toISOString();
   return {
     id: crypto.randomUUID(),
     fileName: file.name,
@@ -250,7 +293,9 @@ function createJob(file: File): MediaJob {
     fileSize: file.size,
     duration: null,
     status: 'loaded',
-    errorMessage: null
+    errorMessage: null,
+    createdAt: now,
+    updatedAt: now
   };
 }
 
@@ -258,10 +303,11 @@ function normalizeLoadedSettings(settings: AppSettings): AppSettings {
   const withAsrModel = isKnownAsrModel(settings.asrProvider, settings.asrModel)
     ? settings
     : { ...settings, asrModel: getDefaultAsrModel(settings.asrProvider) };
+  const normalizedLlmModel = normalizeLlmModel(withAsrModel.llmProvider, withAsrModel.llmModel);
 
-  return isKnownLlmModel(withAsrModel.llmProvider, withAsrModel.llmModel)
+  return normalizedLlmModel === withAsrModel.llmModel
     ? withAsrModel
-    : { ...withAsrModel, llmModel: getDefaultLlmModel(withAsrModel.llmProvider) };
+    : { ...withAsrModel, llmModel: normalizedLlmModel };
 }
 
 function isMediaLimitError(message: string | null): boolean {
@@ -298,6 +344,9 @@ export default function Home() {
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<FeedbackDraft>({ content: '', source: 'ai' });
+  const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [reviews, setReviews] = useState<ReviewJobSummary[]>([]);
+  const [historyQuery, setHistoryQuery] = useState('');
   const [message, setMessage] = useState(copy.zh.initialMessage);
   const [isDragging, setIsDragging] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -309,6 +358,7 @@ export default function Home() {
   const settingsReady = readiness.ready;
   const status = job?.status ?? 'idle';
   const isBusy = status === 'transcribing' || status === 'generating';
+  const filteredReviews = useMemo(() => searchReviews(reviews, historyQuery), [reviews, historyQuery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -333,6 +383,33 @@ export default function Home() {
       }
     };
   }, [fileUrl]);
+
+  useEffect(() => {
+    void refreshReviews();
+  }, []);
+
+  async function refreshReviews() {
+    setReviews(await listReviews());
+  }
+
+  async function persistReview(next?: Partial<{ job: MediaJob | null; segments: TranscriptSegment[]; feedback: FeedbackDraft; scorecard: Scorecard | null }>) {
+    const currentJob = next?.job === undefined ? job : next.job;
+    if (!currentJob) {
+      return;
+    }
+
+    const record = buildReviewRecord({
+      job: currentJob,
+      segments: next?.segments ?? segments,
+      feedback: next?.feedback ?? feedback,
+      scorecard: next?.scorecard === undefined ? scorecard : next.scorecard,
+      settings
+    });
+
+    await saveReview(record);
+    setJob((existing) => existing && existing.id === record.id ? { ...existing, updatedAt: record.updatedAt } : existing);
+    await refreshReviews();
+  }
 
   function updateSettings(updater: (current: AppSettings) => AppSettings) {
     setSettings((current) => {
@@ -423,12 +500,15 @@ export default function Home() {
     setMediaFile(file);
     setFileUrl(nextUrl);
     setMediaKind(file.type.startsWith('video/') ? 'video' : 'audio');
-    setJob(createJob(file));
+    const nextJob = createJob(file);
+    setJob(nextJob);
     setSegments([]);
     setActiveSegmentId(null);
     setFeedback({ content: '', source: 'ai' });
+    setScorecard(null);
     setCopied(false);
     runIdRef.current += 1;
+    void persistReview({ job: nextJob, segments: [], feedback: { content: '', source: 'ai' }, scorecard: null });
     setMessage(t.loadedMessage);
   }
 
@@ -459,7 +539,9 @@ export default function Home() {
         setMessage(errorMessage);
         return;
       }
+      const nextJob = job ? { ...job, duration, errorMessage: null } : null;
       updateJob({ duration, errorMessage: null });
+      void persistReview({ job: nextJob });
     }
   }
 
@@ -494,8 +576,11 @@ export default function Home() {
     try {
       const nextSegments = await transcribeAudio(mediaFile, settings, job.duration);
       if (runId !== runIdRef.current) return;
-      setSegments(nextSegments);
+      const normalizedSegments = nextSegments.map((segment) => ({ ...segment, source: segment.source ?? 'asr' as const }));
+      const nextJob = { ...job, status: 'transcribed' as const, errorMessage: null };
+      setSegments(normalizedSegments);
       updateJob({ status: 'transcribed' });
+      void persistReview({ job: nextJob, segments: normalizedSegments });
       setMessage(t.providerDone(getProviderLabel(settings.asrProvider), nextSegments.length));
     } catch (error) {
       if (runId !== runIdRef.current) return;
@@ -530,19 +615,27 @@ export default function Home() {
     const runId = runIdRef.current + 1;
     runIdRef.current = runId;
     setFeedback({ content: '', source: 'ai' });
+    setScorecard(null);
     setCopied(false);
     updateJob({ status: 'generating', errorMessage: null });
     setMessage(t.providerWorking(getProviderLabel(settings.llmProvider), lang === 'zh' ? '生成反馈' : 'generating feedback'));
 
     try {
-      let content = '';
-      for await (const chunk of streamFeedback(segments, settings)) {
+      let raw = '';
+      const result = await generateFeedbackDraft(segments, settings, (chunk) => {
         if (runId !== runIdRef.current) return;
-        content += chunk;
-        setFeedback({ content, source: 'ai' });
-      }
-      updateJob({ status: 'ready' });
-      setMessage(t.feedbackDone);
+        raw += chunk;
+        setFeedback({ content: raw, source: 'ai' });
+      });
+      if (runId !== runIdRef.current) return;
+      const content = result.scorecard ? result.feedback : result.raw;
+      const nextFeedback = { content, aiContent: content, source: 'ai' as const };
+      const nextJob = job ? { ...job, status: result.parseError ? 'transcribed' as const : 'ready' as const, errorMessage: result.parseError } : null;
+      setFeedback(nextFeedback);
+      setScorecard(result.scorecard);
+      updateJob({ status: result.parseError ? 'transcribed' : 'ready', errorMessage: result.parseError });
+      void persistReview({ job: nextJob, feedback: nextFeedback, scorecard: result.scorecard });
+      setMessage(result.parseError ?? t.feedbackDone);
     } catch (error) {
       if (runId !== runIdRef.current) return;
       const errorMessage = error instanceof Error ? error.message : t.feedbackFailed;
@@ -552,6 +645,55 @@ export default function Home() {
       updateJob({ status: 'failed', errorMessage });
       setMessage(errorMessage);
     }
+  }
+
+  function updateSegmentText(segmentId: string, text: string) {
+    const nextSegments = segments.map((segment) =>
+      segment.id === segmentId ? { ...segment, text, source: 'edited' as const } : segment
+    );
+    setSegments(nextSegments);
+    void persistReview({ segments: nextSegments });
+  }
+
+  function updateFeedback(nextFeedback: FeedbackDraft) {
+    setFeedback(nextFeedback);
+    void persistReview({ feedback: nextFeedback });
+  }
+
+  async function openReview(id: string) {
+    const record = await loadReview(id);
+    if (!record) {
+      return;
+    }
+
+    if (fileUrl) {
+      URL.revokeObjectURL(fileUrl);
+    }
+    setMediaFile(null);
+    setFileUrl(null);
+    setMediaKind(record.fileType.startsWith('video/') ? 'video' : record.fileType.startsWith('audio/') ? 'audio' : null);
+    setJob(toMediaJob(record));
+    setSegments(record.segments);
+    setFeedback(record.feedback);
+    setScorecard(record.scorecard);
+    setActiveSegmentId(null);
+    setCopied(false);
+    runIdRef.current += 1;
+    setCurrentPage('workspace');
+    setMessage(t.loadedReviewMessage);
+  }
+
+  async function removeReview(id: string) {
+    await deleteReview(id);
+    if (job?.id === id) {
+      setJob(null);
+      setSegments([]);
+      setFeedback({ content: '', source: 'ai' });
+      setScorecard(null);
+      setActiveSegmentId(null);
+    }
+    await refreshReviews();
+    setMessage(t.deletedReviewMessage);
   }
 
   async function copyFeedback() {
@@ -590,11 +732,12 @@ export default function Home() {
             </div>
             <nav className="mt-10 space-y-2">
               <NavButton active={currentPage === 'workspace'} label={t.workspace} onClick={() => setCurrentPage('workspace')} />
+              <NavButton active={currentPage === 'history'} label={t.history} onClick={() => setCurrentPage('history')} />
               <NavButton active={currentPage === 'settings'} label={t.settings} onClick={() => setCurrentPage('settings')} />
             </nav>
             <div className="mt-auto border-t border-white/10 pt-4">
               <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-white/30">
-                <span>Version 0.1</span>
+                <span>Version 0.2</span>
                 <span>{t.desktopMvp}</span>
               </div>
             </div>
@@ -610,7 +753,7 @@ export default function Home() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white/90">{t.app}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">{currentPage === 'workspace' ? t.workflow : t.settingsSubtitle}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">{currentPage === 'workspace' ? t.workflow : currentPage === 'history' ? t.historySubtitle : t.settingsSubtitle}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -625,6 +768,8 @@ export default function Home() {
                     <span className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/45 sm:inline-flex">{getFileKindLabel(mediaKind)}</span>
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/70">{t.statuses[status]}</span>
                   </>
+                ) : currentPage === 'history' ? (
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/70">{reviews.length} saved</span>
                 ) : (
                   <span className={`rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest ${settingsReady ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
                     {settingsReady ? t.providerReady : t.providerMissing}
@@ -655,12 +800,23 @@ export default function Home() {
                 playerRef={playerRef}
                 seekTo={seekTo}
                 segments={segments}
+                scorecard={scorecard}
                 setCopied={setCopied}
-                setFeedback={setFeedback}
+                setFeedback={updateFeedback}
                 setIsDragging={setIsDragging}
                 settings={settings}
                 startTranscription={startTranscription}
                 status={status}
+                t={t}
+                updateSegmentText={updateSegmentText}
+              />
+            ) : currentPage === 'history' ? (
+              <HistoryView
+                historyQuery={historyQuery}
+                onDelete={removeReview}
+                onOpen={openReview}
+                reviews={filteredReviews}
+                setHistoryQuery={setHistoryQuery}
                 t={t}
               />
             ) : (
@@ -707,6 +863,7 @@ type WorkspaceProps = {
   playerRef: React.RefObject<HTMLVideoElement | HTMLAudioElement | null>;
   seekTo: (segment: TranscriptSegment) => void;
   segments: TranscriptSegment[];
+  scorecard: Scorecard | null;
   setCopied: (copied: boolean) => void;
   setFeedback: (feedback: FeedbackDraft) => void;
   setIsDragging: (dragging: boolean) => void;
@@ -714,6 +871,7 @@ type WorkspaceProps = {
   startTranscription: () => void;
   status: JobStatus;
   t: Copy;
+  updateSegmentText: (segmentId: string, text: string) => void;
 };
 
 function WorkspaceView(props: WorkspaceProps) {
@@ -784,7 +942,7 @@ function WorkspaceView(props: WorkspaceProps) {
             <div className="flex items-center justify-between border-b border-white/10 p-4">
               <div>
                 <h2 className="text-sm font-bold uppercase tracking-widest text-[var(--accent)]">{props.t.transcription}</h2>
-                <p className="mt-1 text-xs text-white/45">{props.t.transcriptionHelp}</p>
+                <p className="mt-1 text-xs text-white/45">{props.fileUrl ? props.t.transcriptionHelp : props.t.noMediaInHistory}</p>
               </div>
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white/70">{props.segments.length} segments</span>
             </div>
@@ -796,10 +954,22 @@ function WorkspaceView(props: WorkspaceProps) {
               ) : (
                 <div className="space-y-2">
                   {props.segments.map((segment) => (
-                    <button key={segment.id} className={`group w-full rounded-xl border p-3 text-left transition ${props.activeSegmentId === segment.id ? 'border-[var(--accent)] bg-white/10' : 'border-transparent hover:border-white/10 hover:bg-white/5'}`} onClick={() => props.seekTo(segment)} type="button">
-                      <span className="mr-3 font-mono text-[10px] font-bold text-white/45 group-hover:text-white/70">[{formatTime(segment.start)} - {formatTime(segment.end)}]</span>
-                      <span className="text-sm leading-6 text-white/70 group-hover:text-white">{segment.text}</span>
-                    </button>
+                    <div key={segment.id} className={`rounded-xl border p-3 transition ${props.activeSegmentId === segment.id ? 'border-[var(--accent)] bg-white/10' : 'border-white/10 bg-white/[0.03]'}`}>
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <button className="font-mono text-[10px] font-bold text-white/45 hover:text-white/80" onClick={() => props.seekTo(segment)} type="button">
+                          [{formatTime(segment.start)} - {formatTime(segment.end)}]
+                        </button>
+                        <span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-widest ${segment.source === 'edited' ? 'bg-amber-500/15 text-amber-200' : 'bg-white/5 text-white/35'}`}>
+                          {segment.source === 'edited' ? props.t.edited : 'ASR'}
+                        </span>
+                      </div>
+                      <textarea
+                        className="min-h-20 w-full resize-y rounded-lg border border-white/10 bg-black/20 p-3 text-sm leading-6 text-white/75 outline-none focus:border-[var(--accent)]"
+                        aria-label={props.t.editTranscript}
+                        value={segment.text}
+                        onChange={(event) => props.updateSegmentText(segment.id, event.target.value)}
+                      />
+                    </div>
                   ))}
                 </div>
               )}
@@ -808,6 +978,13 @@ function WorkspaceView(props: WorkspaceProps) {
         </div>
 
         <aside className="flex min-w-0 flex-col gap-6">
+          <section className="glass-panel overflow-hidden">
+            <div className="border-b border-white/10 p-4">
+              <h2 className="text-sm font-bold uppercase tracking-widest text-[var(--accent)]">{props.t.scorecard}</h2>
+              <p className="mt-1 text-xs text-white/45">{props.t.scorecardHelp}</p>
+            </div>
+            <ScorecardView scorecard={props.scorecard} t={props.t} />
+          </section>
           <section className="glass-panel flex min-h-[620px] flex-1 flex-col overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-4">
               <div>
@@ -815,7 +992,7 @@ function WorkspaceView(props: WorkspaceProps) {
                 <p className="mt-1 text-xs text-white/45">{props.t.critiqueHelp}</p>
               </div>
               <div className="flex gap-2">
-                <button className="btn-ghost" onClick={props.generateFeedback} disabled={props.segments.length === 0 || props.isBusy} type="button">{props.status === 'generating' ? props.t.generatingButton : props.t.generateFeedback}</button>
+                <button className="btn-ghost" onClick={props.generateFeedback} disabled={props.segments.length === 0 || props.isBusy} type="button">{props.status === 'generating' ? props.t.generatingButton : (props.segments.some((segment) => segment.source === 'edited') ? props.t.regenerateWithTranscript : props.t.generateFeedback)}</button>
                 <button className="btn-primary" onClick={props.copyFeedback} type="button">{props.copied ? props.t.copied : props.t.copy}</button>
               </div>
             </div>
@@ -828,7 +1005,7 @@ function WorkspaceView(props: WorkspaceProps) {
                 value={props.feedback.content}
                 onChange={(event) => {
                   props.setCopied(false);
-                  props.setFeedback({ content: event.target.value, source: 'edited' });
+                  props.setFeedback({ ...props.feedback, content: event.target.value, source: 'edited' });
                 }}
                 placeholder={props.t.feedbackPlaceholder}
               />
@@ -839,6 +1016,104 @@ function WorkspaceView(props: WorkspaceProps) {
             </footer>
           </section>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+type HistoryProps = {
+  historyQuery: string;
+  onDelete: (id: string) => void;
+  onOpen: (id: string) => void;
+  reviews: ReviewJobSummary[];
+  setHistoryQuery: (query: string) => void;
+  t: Copy;
+};
+
+function HistoryView(props: HistoryProps) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar lg:p-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-5">
+        <section className="glass-panel overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-5">
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-widest text-[var(--accent)]">{props.t.history}</h2>
+              <p className="mt-1 text-xs text-white/45">{props.t.historyHelp}</p>
+            </div>
+            <input
+              className="glass-input max-w-md"
+              value={props.historyQuery}
+              onChange={(event) => props.setHistoryQuery(event.target.value)}
+              placeholder={props.t.searchHistory}
+            />
+          </div>
+          <div className="p-4">
+            {props.reviews.length === 0 ? (
+              <div className="flex min-h-[240px] items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.03] text-center text-[10px] font-bold uppercase tracking-[0.2em] text-white/25">
+                {props.t.emptyHistory}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {props.reviews.map((review) => (
+                  <article key={review.id} className="rounded-2xl border border-white/10 bg-black/15 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-bold text-white/90">{review.fileName}</h3>
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/35">
+                          {new Date(review.updatedAt).toLocaleString()} · {review.providerSnapshot.llmProvider}/{review.providerSnapshot.llmModel}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="btn-ghost" onClick={() => props.onOpen(review.id)} type="button">{props.t.openReview}</button>
+                        <button className="rounded-xl border border-rose-300/20 bg-rose-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-rose-100" onClick={() => props.onDelete(review.id)} type="button">{props.t.deleteReview}</button>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <p className="line-clamp-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-white/50">{review.transcriptPreview || props.t.pendingTranscription}</p>
+                      <p className="line-clamp-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-white/50">{review.feedbackPreview || props.t.feedbackPlaceholder}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function ScorecardView({ scorecard, t }: { scorecard: Scorecard | null; t: Copy }) {
+  if (!scorecard) {
+    return (
+      <div className="p-4">
+        <div className="flex min-h-[120px] items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.03] text-center text-[10px] font-bold uppercase tracking-[0.2em] text-white/25">{t.noScorecard}</div>
+      </div>
+    );
+  }
+
+  const metricKeys = Object.keys(scorecardMetricLabels) as ScorecardMetricKey[];
+
+  return (
+    <div className="p-4">
+      <div className="mb-3 rounded-2xl border border-[var(--accent)]/30 bg-white/[0.04] p-4">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-white/35">{t.overallBand}</p>
+        <p className="mt-1 text-3xl font-black text-white">{formatBand(scorecard.overallBand)}</p>
+      </div>
+      <div className="grid grid-cols-1 gap-3">
+        {metricKeys.map((key) => {
+          const metric = scorecard[key];
+          return (
+            <div key={key} className="rounded-2xl border border-white/10 bg-black/15 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-bold text-white/80">{scorecardMetricLabels[key]}</h3>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white">{formatBand(metric.band)}</span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-white/50"><span className="font-bold text-white/70">{t.evidence}: </span>{metric.evidence}</p>
+              <p className="mt-1 text-xs leading-5 text-white/50"><span className="font-bold text-white/70">{t.suggestion}: </span>{metric.suggestion}</p>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

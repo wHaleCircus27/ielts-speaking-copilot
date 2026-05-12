@@ -5,6 +5,13 @@ export type ModelOption = {
   value: string;
 };
 
+export const recommendedNvidiaLlmModel = 'deepseek-ai/deepseek-v4-flash';
+
+const legacyNvidiaLlmModelsToMigrate = new Set([
+  'meta/llama-3.3-70b-instruct',
+  'deepseek-ai/deepseek-v4-pro'
+]);
+
 export const llmModelOptions: Record<LlmProvider, ModelOption[]> = {
   mock: [{ label: 'Mock feedback', value: 'mock-feedback' }],
   openai: [
@@ -26,13 +33,13 @@ export const llmModelOptions: Record<LlmProvider, ModelOption[]> = {
     { label: 'Gemini 1.5 Flash', value: 'gemini-1.5-flash' }
   ],
   nvidia: [
+    { label: 'DeepSeek V4 Flash', value: recommendedNvidiaLlmModel },
     { label: 'Llama 3.3 70B Instruct', value: 'meta/llama-3.3-70b-instruct' },
     { label: 'Llama 4 Maverick 17B 128E', value: 'meta/llama-4-maverick-17b-128e-instruct' },
     { label: 'Nemotron Super 49B v1.5', value: 'nvidia/llama-3.3-nemotron-super-49b-v1.5' },
     { label: 'Nemotron Super 120B A12B', value: 'nvidia/nemotron-3-super-120b-a12b' },
     { label: 'Mistral Large 3 675B', value: 'mistralai/mistral-large-3-675b-instruct-2512' },
     { label: 'DeepSeek V4 Pro', value: 'deepseek-ai/deepseek-v4-pro' },
-    { label: 'DeepSeek V4 Flash', value: 'deepseek-ai/deepseek-v4-flash' },
     { label: 'GPT OSS 120B', value: 'openai/gpt-oss-120b' },
     { label: 'GPT OSS 20B', value: 'openai/gpt-oss-20b' }
   ]
@@ -65,6 +72,15 @@ export function getAsrModelOptions(provider: AsrProvider): ModelOption[] {
 
 export function getDefaultLlmModel(provider: LlmProvider): string {
   return llmModelOptions[provider][0].value;
+}
+
+export function normalizeLlmModel(provider: LlmProvider, model: string): string {
+  const trimmed = model.trim();
+  if (provider === 'nvidia' && legacyNvidiaLlmModelsToMigrate.has(trimmed)) {
+    return recommendedNvidiaLlmModel;
+  }
+
+  return isKnownLlmModel(provider, trimmed) ? trimmed : getDefaultLlmModel(provider);
 }
 
 export function getLlmModelOptions(provider: LlmProvider): ModelOption[] {

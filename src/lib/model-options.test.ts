@@ -7,7 +7,9 @@ import {
   getLlmModelOptions,
   isKnownAsrModel,
   isKnownLlmModel,
-  llmModelOptions
+  llmModelOptions,
+  normalizeLlmModel,
+  recommendedNvidiaLlmModel
 } from './model-options';
 
 describe('asr model options', () => {
@@ -32,14 +34,22 @@ describe('asr model options', () => {
 describe('llm model options', () => {
   it('uses provider-specific defaults', () => {
     expect(getDefaultLlmModel('mock')).toBe('mock-feedback');
-    expect(getDefaultLlmModel('nvidia')).toBe('meta/llama-3.3-70b-instruct');
+    expect(getDefaultLlmModel('nvidia')).toBe(recommendedNvidiaLlmModel);
   });
 
   it('includes verified NVIDIA API catalog model ids', () => {
     const values = llmModelOptions.nvidia.map((option) => option.value);
+    expect(values[0]).toBe(recommendedNvidiaLlmModel);
     expect(values).toContain('meta/llama-3.3-70b-instruct');
     expect(values).toContain('nvidia/nemotron-3-super-120b-a12b');
     expect(values).toContain('openai/gpt-oss-120b');
+  });
+
+  it('migrates known NVIDIA feedback-quality failures to the recommended Flash model', () => {
+    expect(normalizeLlmModel('nvidia', 'meta/llama-3.3-70b-instruct')).toBe(recommendedNvidiaLlmModel);
+    expect(normalizeLlmModel('nvidia', 'deepseek-ai/deepseek-v4-pro')).toBe(recommendedNvidiaLlmModel);
+    expect(normalizeLlmModel('nvidia', 'custom/provider-model')).toBe(recommendedNvidiaLlmModel);
+    expect(normalizeLlmModel('openai', 'gpt-4o-mini')).toBe('gpt-4o-mini');
   });
 
   it('keeps model selection constrained to known provider options', () => {

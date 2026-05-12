@@ -2,15 +2,40 @@
 
 ## Current Implementation State
 
-The V0.1 project folder contains:
+The V0.2 project folder contains:
 
 - PRD and agent context documents.
 - Next.js + React + Tailwind source files.
 - A Tauri v2 shell with a minimal Rust command.
-- A first-pass workspace UI for local media import, playback, timestamped transcript interaction, generated feedback editing, and copy output.
-- A provider facade for Mock/OpenAI/Groq ASR and Mock/OpenAI/Groq/Gemini/NVIDIA LLM.
+- A desktop workspace UI for local media import, playback, timestamped transcript interaction, editable transcript segments, IELTS scorecard display, generated feedback editing, local text-only history, and copy output.
+- A provider facade for Mock/OpenAI/Groq/NVIDIA ASR and Mock/OpenAI/Groq/Gemini/NVIDIA LLM.
 
 Mock flows still use local deterministic demo data in `src/lib/mock-ai.ts`. Real provider calls go through `src/lib/providers.ts`, so UI code should not call OpenAI, Groq, or Gemini directly.
+
+## V0.2 Development Sync
+
+Completed:
+
+- Replaced the planned browser-extension V0.2 direction with local desktop workflow enhancements.
+- Added local text-only review history through Tauri commands: `list_reviews`, `load_review`, `save_review`, and `delete_review`.
+- Review history stores metadata, transcript text, scorecard, final feedback, and provider/model snapshots. It does not store API keys or copy original media files.
+- Added editable transcript segments. Edited segments are marked and used for regenerated feedback.
+- Added structured IELTS scorecard parsing and display with 0.1 band precision from 0 to 9.
+- Updated feedback prompting to request a JSON payload containing `scorecard` and `feedbackMarkdown`.
+- Added history search by file name, date/status metadata, transcript preview, and feedback preview.
+
+Validation:
+
+- `npm.cmd run test` passed with 9 test files and 38 tests.
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed with Next.js static export.
+- `cargo check` passed for the Tauri shell.
+
+Remaining manual checks:
+
+- Full desktop walkthrough for save/reopen/search/delete history in the Tauri shell.
+- Real provider feedback quality check for strict JSON scorecard output.
+- Re-run V0.1 real provider/keyring checks before release.
 
 ## Environment
 
@@ -45,7 +70,7 @@ cargo check
 | LLM feedback | Demo data | Chat Completions streaming | Chat Completions streaming | `streamGenerateContent` SSE | OpenAI-compatible streaming |
 | API key required | No | Yes | Yes | Yes | Yes |
 
-NVIDIA is also supported for LLM feedback through the OpenAI-compatible endpoint `https://integrate.api.nvidia.com/v1/chat/completions`; the default model is `meta/llama-3.3-70b-instruct`.
+NVIDIA is also supported for LLM feedback through the OpenAI-compatible endpoint `https://integrate.api.nvidia.com/v1/chat/completions`; the default/recommended model is `deepseek-ai/deepseek-v4-flash`.
 
 An NVIDIA smoke test with the provided API key returned the expected `provider-ok` response. Do not commit API keys or paste them into logs.
 
@@ -53,7 +78,7 @@ API keys are no longer saved in browser localStorage. In the Tauri desktop shell
 
 Provider requests still use the frontend facade, but real HTTP calls now prefer `@tauri-apps/plugin-http` in the desktop shell. Web-only development can still use Mock provider without API keys or network. The Tauri HTTP permission scope is limited to OpenAI, Groq, Gemini, and NVIDIA endpoints.
 
-ASR and LLM model selection are provider-specific and rendered as dropdowns. ASR supports Mock, OpenAI, Groq, and NVIDIA options. NVIDIA ASR uses the hosted OpenAI-compatible chat completions endpoint with `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` and audio input. Because that hosted path returns plain transcript text rather than native timestamped ASR segments, V0.1 converts it into one full-length `TranscriptSegment` so the media, transcript, and feedback workflow remains usable. LLM supports Mock, OpenAI, Groq, Gemini, and NVIDIA options. NVIDIA LLM options are curated from the NVIDIA API Catalog `/v1/models` response and include verified IDs such as `meta/llama-3.3-70b-instruct`, `nvidia/nemotron-3-super-120b-a12b`, and `openai/gpt-oss-120b`. If a stored setting contains an older custom model ID, the app normalizes it back to the provider default so requests use a known model option.
+ASR and LLM model selection are provider-specific and rendered as dropdowns. ASR supports Mock, OpenAI, Groq, and NVIDIA options. NVIDIA ASR uses the hosted OpenAI-compatible chat completions endpoint with `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` and audio input. Because that hosted path returns plain transcript text rather than native timestamped ASR segments, V0.1 converts it into one full-length `TranscriptSegment` so the media, transcript, and feedback workflow remains usable. LLM supports Mock, OpenAI, Groq, Gemini, and NVIDIA options. NVIDIA LLM options are curated from the NVIDIA API Catalog `/v1/models`; `deepseek-ai/deepseek-v4-flash` is listed first because it passed the Simplified Chinese feedback smoke test. Older stored NVIDIA choices known to produce bad Chinese output or unstable latency (`meta/llama-3.3-70b-instruct` and `deepseek-ai/deepseek-v4-pro`) are migrated back to the recommended Flash model.
 
 Configuration readiness is split by capability. Transcription checks ASR provider/model/API key before starting, and feedback generation checks LLM provider/model/API key before streaming. OpenAI, Groq, and NVIDIA API keys are shared by ASR and LLM requests for the same provider.
 
@@ -70,10 +95,12 @@ Completed:
 - Added settings UI badges showing ASR-ready and LLM-ready states separately.
 - Added visible API Key inputs for all currently selected non-Mock ASR/LLM providers, with shared-key copy for providers used by both capabilities.
 - Added strict model normalization so older custom model strings are not kept as active dropdown values.
+- Updated the NVIDIA LLM default/recommended model to `deepseek-ai/deepseek-v4-flash`; stored NVIDIA `meta/llama-3.3-70b-instruct` and `deepseek-ai/deepseek-v4-pro` selections now migrate to Flash.
+- Added conservative NVIDIA feedback generation limits: `max_tokens: 900` and `temperature: 0.3`.
 - Updated NVIDIA connection testing to call the same OpenAI-compatible chat completions endpoint used by feedback generation, with the currently selected model.
 - Verified the provided NVIDIA API key against `https://integrate.api.nvidia.com/v1/chat/completions` without logging or committing the key.
 - Verified all curated NVIDIA dropdown models with a minimal non-streaming chat completion request.
-- Verified NVIDIA streaming chat completion with `meta/llama-3.3-70b-instruct`.
+- Verified NVIDIA streaming chat completion with `meta/llama-3.3-70b-instruct`, then replaced it as the default after Chinese feedback quality failed.
 
 Passed:
 
@@ -91,10 +118,28 @@ Not yet completed:
 - Real OpenAI/Groq/Gemini LLM validation beyond unit-level endpoint selection.
 - Manual verification of OS keyring prompts and clipboard behavior in the desktop shell after the ASR settings change.
 
-## Next Engineering Steps
+## V0.1 Verification Handoff
 
-1. Run `npm.cmd run dev` to manually verify the web UI with Mock provider.
-2. Run `npm.cmd run tauri:dev` to manually verify the desktop shell.
-3. Test real OpenAI/Groq ASR and OpenAI/Groq/Gemini/NVIDIA LLM with valid API keys.
-4. Expand manual desktop verification with real OpenAI/Groq ASR and OpenAI/Groq/Gemini/NVIDIA LLM provider runs.
-5. Add packaging notes for macOS first-run permission behavior once the desktop walkthrough is complete.
+Manual verification is tracked in `MANUAL-VERIFICATION-V0.1.md`.
+
+2026-05-12 verification pass:
+
+- `npm.cmd run test` passed with 7 test files and 29 tests after adding NVIDIA default/migration/request-body coverage.
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed with Next.js static export.
+- `cargo check` passed for the Tauri shell.
+- Local test resources were inspected without printing secrets: `speakTest-nvidia-asr.wav` is under the 25 MB default limit, `speakTest.mp4` is over the 25 MB default limit and suitable for limit-state checks, and the saved DeepSeek V4 Flash feedback contains all six required Markdown headings.
+- `npm.cmd run dev -- --hostname 127.0.0.1 --port 3000` started successfully and returned HTTP 200.
+- `npm.cmd run tauri:dev` compiled and launched `target\debug\ielts-speaking-copilot.exe`; the shell loaded `/` with HTTP 200.
+- The user completed the Mock UI click walkthrough and confirmed the tested UI items passed.
+- NVIDIA ASR was tested with the speaking sample from `D:\CodexProject\testResource`. Direct MP4 upload failed because the request exceeded the NVIDIA payload limit, but an extracted WAV audio asset succeeded and returned a non-empty transcript.
+- NVIDIA LLM OpenAI-compatible streaming was tested with the NVIDIA API key. The stream returned chunks and `[DONE]`, but `meta/llama-3.3-70b-instruct` produced garbled Chinese feedback and failed the required heading/content quality check for this scenario.
+- NVIDIA LLM `deepseek-ai/deepseek-v4-flash` passed a controlled streaming smoke test with shortened transcript input and 450 max output tokens, returning valid Simplified Chinese Markdown with all required headings.
+- NVIDIA LLM `deepseek-ai/deepseek-v4-pro` is not suitable in this pass: one full streaming attempt returned garbled question-mark output, and one controlled short streaming attempt exceeded the 120 second request budget.
+
+Remaining release-blocking checks:
+
+1. Test real OpenAI/Groq ASR and OpenAI/Groq/Gemini LLM with valid API keys.
+2. Verify non-Mock API key persistence through OS secure credential storage in the desktop shell.
+3. Re-run the Tauri desktop walkthrough with a short non-sensitive spoken audio sample and a locally provided NVIDIA key without printing or committing the key.
+4. Add packaging notes for macOS first-run credential prompts once the desktop credential walkthrough is complete.

@@ -1,4 +1,5 @@
 import { buildFeedback, createDraftTranscript } from './mock-ai';
+import { parseFeedbackPayload } from './scorecard';
 import type { AppSettings, AsrProvider, LlmProvider, TranscriptSegment } from './types';
 
 type JsonRecord = Record<string, unknown>;
@@ -95,6 +96,23 @@ export async function* streamFeedback(
   }
 
   yield* streamGeminiFeedback(segments, settings);
+}
+
+export async function generateFeedbackDraft(
+  segments: TranscriptSegment[],
+  settings: AppSettings,
+  onChunk?: (chunk: string) => void
+) {
+  let raw = '';
+  for await (const chunk of streamFeedback(segments, settings)) {
+    raw += chunk;
+    onChunk?.(chunk);
+  }
+
+  return {
+    raw,
+    ...parseFeedbackPayload(raw)
+  };
 }
 
 export async function testLlmProviderConnection(
@@ -271,7 +289,8 @@ async function* streamNvidiaFeedback(
   yield* streamChatCompletions('https://integrate.api.nvidia.com/v1/chat/completions', settings.apiKeys.nvidia, {
     model: settings.llmModel,
     messages: buildFeedbackMessages(segments),
-    temperature: 0.4,
+    max_tokens: 900,
+    temperature: 0.3,
     stream: true
   });
 }
@@ -486,7 +505,7 @@ function buildFeedbackMessages(segments: TranscriptSegment[]) {
     {
       role: 'system',
       content:
-        'You are an IELTS speaking teacher. Write concise, actionable feedback in Simplified Chinese. Use Markdown headings exactly as requested.'
+        'You are an IELTS speaking teacher. Return only valid JSON. Write concise, actionable feedback in Simplified Chinese.'
     },
     {
       role: 'user',
@@ -500,7 +519,7 @@ function buildFeedbackPrompt(segments: TranscriptSegment[]): string {
     .map((segment) => `[${segment.start.toFixed(1)}-${segment.end.toFixed(1)}] ${segment.text}`)
     .join('\n');
 
-  return `请根据以下雅思口语转录生成批改反馈。\n\n要求使用以下 Markdown 结构：\n\n## 总评\n## 优点\n## 主要问题\n## 原句与修改建议\n## 提升建议\n## 可直接发送给学生的最终评语\n\n转录：\n${transcript}`;
+  return `请根据以下雅思口语转录生成批改反馈。\n\n必须只返回一个 JSON 对象，不要使用 Markdown 代码块。JSON 格式如下：\n{\n  "scorecard": {\n    "overallBand": 6.7,\n    "fluencyCoherence": { "band": 6.8, "evidence": "...", "suggestion": "..." },\n    "lexicalResource": { "band": 6.6, "evidence": "...", "suggestion": "..." },\n    "grammaticalRangeAccuracy": { "band": 6.4, "evidence": "...", "suggestion": "..." },\n    "pronunciation": { "band": 6.9, "evidence": "...", "suggestion": "..." }\n  },\n  "feedbackMarkdown": "## 总评\\n..."\n}\n\n评分要求：\n- band 使用 0.1 粒度，范围 0-9，例如 6.7；不要四舍五入到 0.5。\n- 四项标准必须分别给出 band、证据 evidence、改进建议 suggestion。\n- feedbackMarkdown 必须使用以下 Markdown 结构：\n\n## 总评\n## 优点\n## 主要问题\n## 原句与修改建议\n## 提升建议\n## 可直接发送给学生的最终评语\n\n转录：\n${transcript}`;
 }
 
 async function* streamMockFeedback(segments: TranscriptSegment[]): AsyncGenerator<string> {

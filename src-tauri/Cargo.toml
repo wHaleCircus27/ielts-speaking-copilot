@@ -1,6 +1,6 @@
 [package]
 name = "ielts-speaking-copilot"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local desktop workspace for IELTS speaking feedback"
 authors = ["IELTS Speaking Copilot"]
 edition = "2021"
