@@ -4,17 +4,24 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatBytes, formatTime } from '@/lib/format';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
-  getProviderApiKey,
   getProviderLabel,
-  needsLlmKey,
   streamFeedback,
   testLlmProviderConnection,
   transcribeAudio
 } from '@/lib/providers';
 import { findActiveSegmentId, seekPlayerToSegment } from '@/lib/playback';
-import { getDefaultLlmModel, getLlmModelOptions, isKnownLlmModel } from '@/lib/model-options';
+import {
+  getAsrModelOptions,
+  getDefaultAsrModel,
+  getDefaultLlmModel,
+  getLlmModelOptions,
+  isKnownAsrModel,
+  isKnownLlmModel
+} from '@/lib/model-options';
+import { describeMissingConfig, getSettingsReadiness } from '@/lib/settings-validation';
 import { defaultSettings, loadSettings, saveSettings } from '@/lib/storage';
-import type { AppSettings, FeedbackDraft, JobStatus, LlmProvider, MediaJob, TranscriptSegment } from '@/lib/types';
+import type { SettingsReadiness } from '@/lib/settings-validation';
+import type { AppSettings, AsrProvider, FeedbackDraft, JobStatus, LlmProvider, MediaJob, TranscriptSegment } from '@/lib/types';
 
 type AppPage = 'workspace' | 'settings';
 type Lang = AppSettings['appearance']['language'];
@@ -85,7 +92,9 @@ const copy = {
     themeColor: '主题颜色',
     language: '界面语言',
     providerSettings: 'Provider Settings',
-    providerHelp: '先选择 LLM 提供商，再填写对应 API Key。Mock 模式不需要 Key。',
+    providerHelp: '分别配置 ASR 与 LLM。OpenAI/Groq 的 ASR 和 LLM 会共用对应 provider 的 API Key。',
+    asrProvider: 'ASR 提供商',
+    asrModel: 'ASR 模型',
     llmProvider: 'LLM 提供商',
     llmModel: 'LLM 模型',
     apiKey: 'API Key',
@@ -96,11 +105,17 @@ const copy = {
     providerMissing: 'Provider Missing',
     maxFileMb: '最大文件 MB',
     maxDurationMinutes: '最大时长 分钟',
-    tempLocalStorage: '临时保存在本地浏览器存储',
+    secureLocalStorage: '桌面端会保存到系统安全凭据存储',
     testOk: (provider: string) => `${provider} 连接测试成功。`,
     testFail: (provider: string, reason: string) => `${provider} 连接测试失败：${reason}`,
     mockOk: 'Mock provider 不需要 API Key，连接测试通过。',
     needApiKey: (provider: string) => `请先填写 ${provider} API Key。`,
+    asrReady: 'ASR Ready',
+    asrMissing: 'ASR Missing',
+    llmReady: 'LLM Ready',
+    llmMissing: 'LLM Missing',
+    configured: '已配置',
+    sharedProviderKey: (provider: string) => `${provider} API Key 会同时用于该 provider 的 ASR 和 LLM 请求。`,
     copiedMessage: '已复制当前编辑区的最终反馈。',
     noFeedbackMessage: '没有可复制的反馈内容。',
     clipboardError: '复制失败。请检查系统剪贴板权限。',
@@ -171,7 +186,9 @@ const copy = {
     themeColor: 'Theme color',
     language: 'Interface language',
     providerSettings: 'Provider Settings',
-    providerHelp: 'Choose an LLM provider first, then enter that provider API key. Mock needs no key.',
+    providerHelp: 'Configure ASR and LLM separately. OpenAI/Groq ASR and LLM share that provider API key.',
+    asrProvider: 'ASR Provider',
+    asrModel: 'ASR Model',
     llmProvider: 'LLM Provider',
     llmModel: 'LLM Model',
     apiKey: 'API Key',
@@ -182,11 +199,17 @@ const copy = {
     providerMissing: 'Provider Missing',
     maxFileMb: 'Max file MB',
     maxDurationMinutes: 'Max duration minutes',
-    tempLocalStorage: 'Temporarily stored in local browser storage',
+    secureLocalStorage: 'Stored in desktop secure credential storage',
     testOk: (provider: string) => `${provider} connection test succeeded.`,
     testFail: (provider: string, reason: string) => `${provider} connection test failed: ${reason}`,
     mockOk: 'Mock provider needs no API key. Connection test passed.',
     needApiKey: (provider: string) => `Please enter the ${provider} API Key first.`,
+    asrReady: 'ASR Ready',
+    asrMissing: 'ASR Missing',
+    llmReady: 'LLM Ready',
+    llmMissing: 'LLM Missing',
+    configured: 'Configured',
+    sharedProviderKey: (provider: string) => `${provider} API Key is shared by ASR and LLM requests for that provider.`,
     copiedMessage: 'Copied the current final feedback text.',
     noFeedbackMessage: 'There is no feedback content to copy.',
     clipboardError: 'Copy failed. Check system clipboard permissions.',
@@ -231,9 +254,14 @@ function createJob(file: File): MediaJob {
   };
 }
 
-function hasRequiredSettings(settings: AppSettings): boolean {
-  const llmReady = settings.llmModel.trim() && (!needsLlmKey(settings) || getProviderApiKey(settings, settings.llmProvider));
-  return Boolean(llmReady);
+function normalizeLoadedSettings(settings: AppSettings): AppSettings {
+  const withAsrModel = isKnownAsrModel(settings.asrProvider, settings.asrModel)
+    ? settings
+    : { ...settings, asrModel: getDefaultAsrModel(settings.asrProvider) };
+
+  return isKnownLlmModel(withAsrModel.llmProvider, withAsrModel.llmModel)
+    ? withAsrModel
+    : { ...withAsrModel, llmModel: getDefaultLlmModel(withAsrModel.llmProvider) };
 }
 
 function isMediaLimitError(message: string | null): boolean {
@@ -277,7 +305,8 @@ export default function Home() {
 
   const lang = settings.appearance.language;
   const t = copy[lang];
-  const settingsReady = useMemo(() => hasRequiredSettings(settings), [settings]);
+  const readiness = useMemo(() => getSettingsReadiness(settings), [settings]);
+  const settingsReady = readiness.ready;
   const status = job?.status ?? 'idle';
   const isBusy = status === 'transcribing' || status === 'generating';
 
@@ -285,9 +314,7 @@ export default function Home() {
     let cancelled = false;
     void loadSettings().then((loaded) => {
       if (cancelled) return;
-      const normalized = isKnownLlmModel(loaded.llmProvider, loaded.llmModel)
-        ? loaded
-        : { ...loaded, llmModel: getDefaultLlmModel(loaded.llmProvider) };
+      const normalized = normalizeLoadedSettings(loaded);
       setSettings(normalized);
       if (normalized !== loaded) {
         void saveSettings(normalized);
@@ -319,8 +346,12 @@ export default function Home() {
     setJob((current) => (current ? { ...current, ...partial } : current));
   }
 
-  function handleSettingsChange(field: 'llmModel', value: string) {
+  function handleSettingsChange(field: 'asrModel' | 'llmModel', value: string) {
     updateSettings((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleAsrProviderChange(provider: AsrProvider) {
+    updateSettings((current) => ({ ...current, asrProvider: provider, asrModel: getDefaultAsrModel(provider) }));
   }
 
   function handleLlmProviderChange(provider: LlmProvider) {
@@ -450,6 +481,10 @@ export default function Home() {
       setMessage(t.mediaStateError);
       return;
     }
+    if (!readiness.asr.ready) {
+      setMessage(describeMissingConfig(readiness.asr, 'ASR', lang));
+      return;
+    }
 
     const runId = runIdRef.current + 1;
     runIdRef.current = runId;
@@ -484,6 +519,10 @@ export default function Home() {
   async function generateFeedback() {
     if (segments.length === 0) {
       setMessage(t.feedbackFirst);
+      return;
+    }
+    if (!readiness.llm.ready) {
+      setMessage(describeMissingConfig(readiness.llm, 'LLM', lang));
       return;
     }
 
@@ -627,11 +666,13 @@ export default function Home() {
             ) : (
               <SettingsView
                 handleApiKeyChange={handleApiKeyChange}
+                handleAsrProviderChange={handleAsrProviderChange}
                 handleAppearanceChange={handleAppearanceChange}
                 handleLimitChange={handleLimitChange}
                 handleLlmProviderChange={handleLlmProviderChange}
                 handleSettingsChange={handleSettingsChange}
                 isTestingConnection={isTestingConnection}
+                readiness={readiness}
                 settings={settings}
                 settingsReady={settingsReady}
                 t={t}
@@ -805,11 +846,13 @@ function WorkspaceView(props: WorkspaceProps) {
 
 type SettingsProps = {
   handleApiKeyChange: (provider: keyof AppSettings['apiKeys'], value: string) => void;
+  handleAsrProviderChange: (provider: AsrProvider) => void;
   handleAppearanceChange: (nextAppearance: Partial<AppSettings['appearance']>) => void;
   handleLimitChange: (field: keyof AppSettings['limits'], value: string) => void;
   handleLlmProviderChange: (provider: LlmProvider) => void;
-  handleSettingsChange: (field: 'llmModel', value: string) => void;
+  handleSettingsChange: (field: 'asrModel' | 'llmModel', value: string) => void;
   isTestingConnection: boolean;
+  readiness: SettingsReadiness;
   settings: AppSettings;
   settingsReady: boolean;
   t: Copy;
@@ -817,10 +860,14 @@ type SettingsProps = {
 };
 
 function SettingsView(props: SettingsProps) {
-  const selectedProvider = props.settings.llmProvider;
-  const selectedProviderLabel = getProviderLabel(selectedProvider);
-  const selectedApiKey = selectedProvider === 'mock' ? '' : props.settings.apiKeys[selectedProvider];
-  const modelOptions = getLlmModelOptions(selectedProvider, props.settings.llmModel);
+  const selectedAsrProvider = props.settings.asrProvider;
+  const selectedLlmProvider = props.settings.llmProvider;
+  const selectedProviderLabel = getProviderLabel(selectedLlmProvider);
+  const visibleApiKeyProviders = Array.from(
+    new Set([selectedAsrProvider, selectedLlmProvider].filter((provider): provider is keyof AppSettings['apiKeys'] => provider !== 'mock'))
+  );
+  const asrModelOptions = getAsrModelOptions(selectedAsrProvider);
+  const llmModelOptions = getLlmModelOptions(selectedLlmProvider);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4 custom-scrollbar lg:p-6">
@@ -878,8 +925,26 @@ function SettingsView(props: SettingsProps) {
             </div>
           </div>
           <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2">
+            <div className="sm:col-span-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <ProviderStatus label={props.t.asrReady} missingLabel={props.t.asrMissing} ready={props.readiness.asr.ready} missing={props.readiness.asr.missing} configuredLabel={props.t.configured} />
+              <ProviderStatus label={props.t.llmReady} missingLabel={props.t.llmMissing} ready={props.readiness.llm.ready} missing={props.readiness.llm.missing} configuredLabel={props.t.configured} />
+            </div>
+            <Field label={props.t.asrProvider}>
+              <select className="glass-input" value={selectedAsrProvider} onChange={(event) => props.handleAsrProviderChange(event.target.value as AsrProvider)}>
+                <option value="mock">Mock</option>
+                <option value="openai">OpenAI</option>
+                <option value="groq">Groq</option>
+              </select>
+            </Field>
+            <Field label={props.t.asrModel}>
+              <select className="glass-input" value={props.settings.asrModel} onChange={(event) => props.handleSettingsChange('asrModel', event.target.value)}>
+                {asrModelOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </Field>
             <Field label={props.t.llmProvider}>
-              <select className="glass-input" value={selectedProvider} onChange={(event) => props.handleLlmProviderChange(event.target.value as LlmProvider)}>
+              <select className="glass-input" value={selectedLlmProvider} onChange={(event) => props.handleLlmProviderChange(event.target.value as LlmProvider)}>
                 <option value="mock">Mock</option>
                 <option value="openai">OpenAI</option>
                 <option value="groq">Groq</option>
@@ -889,20 +954,20 @@ function SettingsView(props: SettingsProps) {
             </Field>
             <Field label={props.t.llmModel}>
               <select className="glass-input" value={props.settings.llmModel} onChange={(event) => props.handleSettingsChange('llmModel', event.target.value)}>
-                {modelOptions.map((option) => (
+                {llmModelOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </Field>
-            {selectedProvider !== 'mock' ? (
-              <Field label={props.t.apiKeyFor(selectedProviderLabel)} wide>
-                <input className="glass-input" type="password" value={selectedApiKey} onChange={(event) => props.handleApiKeyChange(selectedProvider, event.target.value)} placeholder={props.t.tempLocalStorage} />
+            {visibleApiKeyProviders.map((provider) => (
+              <Field key={provider} label={props.t.apiKeyFor(getProviderLabel(provider))} wide>
+                <input className="glass-input" type="password" value={props.settings.apiKeys[provider]} onChange={(event) => props.handleApiKeyChange(provider, event.target.value)} placeholder={props.t.secureLocalStorage} />
               </Field>
-            ) : null}
+            ))}
             <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/15 p-4">
               <div>
                 <p className="text-xs font-semibold text-white/80">{selectedProviderLabel}</p>
-                <p className="mt-1 text-xs text-white/40">{selectedProvider === 'mock' ? props.t.mockOk : props.t.apiKeyFor(selectedProviderLabel)}</p>
+                <p className="mt-1 text-xs text-white/40">{selectedLlmProvider === 'mock' ? props.t.mockOk : props.t.sharedProviderKey(selectedProviderLabel)}</p>
               </div>
               <button className="btn-primary" onClick={props.testProviderConnection} disabled={props.isTestingConnection} type="button">
                 {props.isTestingConnection ? props.t.testing : props.t.testConnection}
@@ -943,6 +1008,29 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
       <p className="text-[10px] font-bold uppercase tracking-widest text-white/30">{label}</p>
       <p className="mt-1 truncate text-xs font-semibold text-white/75">{value}</p>
+    </div>
+  );
+}
+
+function ProviderStatus({
+  label,
+  missingLabel,
+  ready,
+  missing,
+  configuredLabel
+}: {
+  label: string;
+  missingLabel: string;
+  ready: boolean;
+  missing: string[];
+  configuredLabel: string;
+}) {
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${ready ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-amber-400/20 bg-amber-500/10'}`}>
+      <p className={`text-[10px] font-bold uppercase tracking-widest ${ready ? 'text-emerald-300' : 'text-amber-200'}`}>
+        {ready ? label : missingLabel}
+      </p>
+      <p className="mt-1 truncate text-xs text-white/45">{ready ? configuredLabel : missing.join(', ')}</p>
     </div>
   );
 }

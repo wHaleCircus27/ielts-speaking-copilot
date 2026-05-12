@@ -1,4 +1,4 @@
-import type { LlmProvider } from './types';
+import type { AsrProvider, LlmProvider } from './types';
 
 export type ModelOption = {
   label: string;
@@ -38,12 +38,38 @@ export const llmModelOptions: Record<LlmProvider, ModelOption[]> = {
   ]
 };
 
+export const asrModelOptions: Record<AsrProvider, ModelOption[]> = {
+  mock: [{ label: 'Mock transcript', value: 'mock-transcript' }],
+  openai: [
+    { label: 'GPT-4o mini transcribe', value: 'gpt-4o-mini-transcribe' },
+    { label: 'GPT-4o transcribe', value: 'gpt-4o-transcribe' },
+    { label: 'Whisper 1', value: 'whisper-1' }
+  ],
+  groq: [
+    { label: 'Whisper Large v3 Turbo', value: 'whisper-large-v3-turbo' },
+    { label: 'Whisper Large v3', value: 'whisper-large-v3' },
+    { label: 'Distil Whisper Large v3 EN', value: 'distil-whisper-large-v3-en' }
+  ]
+};
+
+export function getDefaultAsrModel(provider: AsrProvider): string {
+  return asrModelOptions[provider][0].value;
+}
+
+export function getAsrModelOptions(provider: AsrProvider): ModelOption[] {
+  return asrModelOptions[provider];
+}
+
 export function getDefaultLlmModel(provider: LlmProvider): string {
   return llmModelOptions[provider][0].value;
 }
 
-export function getLlmModelOptions(provider: LlmProvider, currentModel: string): ModelOption[] {
+export function getLlmModelOptions(provider: LlmProvider): ModelOption[] {
   return llmModelOptions[provider];
+}
+
+export function isKnownAsrModel(provider: AsrProvider, model: string): boolean {
+  return asrModelOptions[provider].some((option) => option.value === model.trim());
 }
 
 export function isKnownLlmModel(provider: LlmProvider, model: string): boolean {

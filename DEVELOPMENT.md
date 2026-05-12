@@ -53,13 +53,21 @@ API keys are no longer saved in browser localStorage. In the Tauri desktop shell
 
 Provider requests still use the frontend facade, but real HTTP calls now prefer `@tauri-apps/plugin-http` in the desktop shell. Web-only development can still use Mock provider without API keys or network. The Tauri HTTP permission scope is limited to OpenAI, Groq, Gemini, and NVIDIA endpoints.
 
-LLM model selection is provider-specific and rendered as a dropdown. NVIDIA options are curated from the NVIDIA API Catalog `/v1/models` response and include verified IDs such as `meta/llama-3.3-70b-instruct`, `nvidia/nemotron-3-super-120b-a12b`, and `openai/gpt-oss-120b`. If a stored setting contains an older custom model ID, the app normalizes it back to the provider default so generation uses a known model option.
+ASR and LLM model selection are provider-specific and rendered as dropdowns. ASR supports Mock, OpenAI, and Groq options. LLM supports Mock, OpenAI, Groq, Gemini, and NVIDIA options. NVIDIA options are curated from the NVIDIA API Catalog `/v1/models` response and include verified IDs such as `meta/llama-3.3-70b-instruct`, `nvidia/nemotron-3-super-120b-a12b`, and `openai/gpt-oss-120b`. If a stored setting contains an older custom model ID, the app normalizes it back to the provider default so requests use a known model option.
+
+Configuration readiness is split by capability. Transcription checks ASR provider/model/API key before starting, and feedback generation checks LLM provider/model/API key before streaming. OpenAI and Groq API keys are shared by ASR and LLM requests for the same provider.
+
+Desktop API keys are stored through the OS secure credential store. On macOS, first use may show a Keychain access prompt for `com.ieltsspeaking.copilot.api-key`. On Windows, the `keyring` crate uses the Windows-native credential backend. Web-only development does not have Tauri command access, so real provider key persistence is only intended for the desktop shell; Mock mode remains usable without keys or network.
 
 ## 2026-05-12 Development Sync
 
 Completed:
 
 - Added provider-specific LLM model dropdowns for Mock, OpenAI, Groq, Gemini, and NVIDIA.
+- Added provider-specific ASR model dropdowns for Mock, OpenAI, and Groq.
+- Added separate ASR and LLM readiness checks before transcription and feedback generation.
+- Added settings UI badges showing ASR-ready and LLM-ready states separately.
+- Added visible API Key inputs for all currently selected non-Mock ASR/LLM providers, with shared-key copy for providers used by both capabilities.
 - Added strict model normalization so older custom model strings are not kept as active dropdown values.
 - Updated NVIDIA connection testing to call the same OpenAI-compatible chat completions endpoint used by feedback generation, with the currently selected model.
 - Verified the provided NVIDIA API key against `https://integrate.api.nvidia.com/v1/chat/completions` without logging or committing the key.
@@ -79,6 +87,7 @@ Not yet completed:
 - Full Tauri desktop manual walkthrough after the latest connection-test change.
 - Real ASR provider validation with OpenAI/Groq keys.
 - Real OpenAI/Groq/Gemini LLM validation beyond unit-level endpoint selection.
+- Manual verification of OS keyring prompts and clipboard behavior in the desktop shell after the ASR settings change.
 
 ## Next Engineering Steps
 
@@ -86,4 +95,4 @@ Not yet completed:
 2. Run `npm.cmd run tauri:dev` to manually verify the desktop shell.
 3. Test real OpenAI/Groq ASR and OpenAI/Groq/Gemini/NVIDIA LLM with valid API keys.
 4. Expand manual desktop verification with real OpenAI/Groq ASR and OpenAI/Groq/Gemini/NVIDIA LLM provider runs.
-5. Add packaging notes for macOS keychain prompts and first-run permission behavior.
+5. Add packaging notes for macOS first-run permission behavior once the desktop walkthrough is complete.
