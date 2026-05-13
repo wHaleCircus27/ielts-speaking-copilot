@@ -17,7 +17,7 @@ export type TranscriptSegment = {
 
 export type AsrProvider = 'mock' | 'openai' | 'groq' | 'nvidia';
 
-export type LlmProvider = 'mock' | 'openai' | 'groq' | 'gemini' | 'nvidia';
+export type LlmProvider = 'mock' | 'openai' | 'groq' | 'gemini' | 'nvidia' | 'deepseek';
 
 export type AppSettings = {
   asrProvider: AsrProvider;
@@ -35,6 +35,7 @@ export type AppSettings = {
     groq: string;
     gemini: string;
     nvidia: string;
+    deepseek: string;
   };
   limits: {
     maxFileSizeMb: number;

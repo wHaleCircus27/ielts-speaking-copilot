@@ -34,7 +34,7 @@ describe('settings readiness', () => {
     const readiness = getSettingsReadiness(settingsWith({
       asrProvider: 'openai',
       asrModel: '',
-      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '' }
+      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '', deepseek: '' }
     }));
 
     expect(readiness.asr.ready).toBe(false);
@@ -47,7 +47,7 @@ describe('settings readiness', () => {
     const readiness = getSettingsReadiness(settingsWith({
       asrProvider: 'nvidia',
       asrModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
-      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '' }
+      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '', deepseek: '' }
     }));
 
     expect(readiness.asr.ready).toBe(false);
@@ -58,7 +58,7 @@ describe('settings readiness', () => {
     const readiness = getSettingsReadiness(settingsWith({
       llmProvider: 'gemini',
       llmModel: '',
-      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '' }
+      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '', deepseek: '' }
     }));
 
     expect(readiness.asr.ready).toBe(true);
@@ -66,10 +66,22 @@ describe('settings readiness', () => {
     expect(readiness.llm.missing).toEqual(['LLM model', 'GEMINI API Key']);
   });
 
+  it('requires a DeepSeek API key before DeepSeek feedback generation', () => {
+    const readiness = getSettingsReadiness(settingsWith({
+      llmProvider: 'deepseek',
+      llmModel: 'deepseek-v4-flash',
+      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '', deepseek: '' }
+    }));
+
+    expect(readiness.asr.ready).toBe(true);
+    expect(readiness.llm.ready).toBe(false);
+    expect(readiness.llm.missing).toEqual(['DEEPSEEK API Key']);
+  });
+
   it('describes missing config in the active UI language', () => {
     const readiness = getSettingsReadiness(settingsWith({
       asrProvider: 'groq',
-      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '' }
+      apiKeys: { openai: '', groq: '', gemini: '', nvidia: '', deepseek: '' }
     }));
 
     expect(describeMissingConfig(readiness.asr, 'ASR', 'zh')).toContain('ASR 配置不完整');

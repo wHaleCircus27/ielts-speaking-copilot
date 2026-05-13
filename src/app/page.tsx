@@ -114,7 +114,7 @@ const copy = {
     themeColor: '主题颜色',
     language: '界面语言',
     providerSettings: 'Provider Settings',
-    providerHelp: '分别配置 ASR 与 LLM。OpenAI、Groq、NVIDIA 的 ASR 和 LLM 会共用对应 provider 的 API Key。',
+    providerHelp: '分别配置 ASR 与 LLM。OpenAI、Groq、NVIDIA 的 ASR 和 LLM 会共用对应 provider 的 API Key；DeepSeek 仅用于 LLM 批改。',
     asrProvider: 'ASR 提供商',
     asrModel: 'ASR 模型',
     llmProvider: 'LLM 提供商',
@@ -137,7 +137,7 @@ const copy = {
     llmReady: 'LLM Ready',
     llmMissing: 'LLM Missing',
     configured: '已配置',
-    sharedProviderKey: (provider: string) => `${provider} API Key 会同时用于该 provider 的 ASR 和 LLM 请求。`,
+    sharedProviderKey: (provider: string) => `${provider} API Key 会用于当前选择的真实 provider 请求。`,
     copiedMessage: '已复制当前编辑区的最终反馈。',
     noFeedbackMessage: '没有可复制的反馈内容。',
     clipboardError: '复制失败。请检查系统剪贴板权限。',
@@ -228,7 +228,7 @@ const copy = {
     themeColor: 'Theme color',
     language: 'Interface language',
     providerSettings: 'Provider Settings',
-    providerHelp: 'Configure ASR and LLM separately. OpenAI, Groq, and NVIDIA ASR/LLM share that provider API key.',
+    providerHelp: 'Configure ASR and LLM separately. OpenAI, Groq, and NVIDIA share provider keys across ASR/LLM; DeepSeek is LLM-only.',
     asrProvider: 'ASR Provider',
     asrModel: 'ASR Model',
     llmProvider: 'LLM Provider',
@@ -251,7 +251,7 @@ const copy = {
     llmReady: 'LLM Ready',
     llmMissing: 'LLM Missing',
     configured: 'Configured',
-    sharedProviderKey: (provider: string) => `${provider} API Key is shared by ASR and LLM requests for that provider.`,
+    sharedProviderKey: (provider: string) => `${provider} API Key is used for the selected real provider requests.`,
     copiedMessage: 'Copied the current final feedback text.',
     noFeedbackMessage: 'There is no feedback content to copy.',
     clipboardError: 'Copy failed. Check system clipboard permissions.',
@@ -757,21 +757,21 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="btn-ghost" onClick={() => handleAppearanceChange({ language: lang === 'zh' ? 'en' : 'zh' })} type="button">
+                <button className="btn-ghost topbar-control" onClick={() => handleAppearanceChange({ language: lang === 'zh' ? 'en' : 'zh' })} type="button">
                   {lang === 'zh' ? 'EN' : '中文'}
                 </button>
-                <button className="btn-ghost lg:hidden" onClick={() => setCurrentPage(currentPage === 'workspace' ? 'settings' : 'workspace')} type="button">
+                <button className="btn-ghost topbar-control lg:hidden" onClick={() => setCurrentPage(currentPage === 'workspace' ? 'settings' : 'workspace')} type="button">
                   {currentPage === 'workspace' ? t.settings : t.workspace}
                 </button>
                 {currentPage === 'workspace' ? (
                   <>
-                    <span className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/45 sm:inline-flex">{getFileKindLabel(mediaKind)}</span>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/70">{t.statuses[status]}</span>
+                    <span className="topbar-control hidden rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/45 sm:inline-flex">{getFileKindLabel(mediaKind)}</span>
+                    <span className="topbar-control rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/70">{t.statuses[status]}</span>
                   </>
                 ) : currentPage === 'history' ? (
-                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/70">{reviews.length} saved</span>
+                  <span className="topbar-control rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white/70">{reviews.length} saved</span>
                 ) : (
-                  <span className={`rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest ${settingsReady ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                  <span className={`topbar-control rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest ${settingsReady ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
                     {settingsReady ? t.providerReady : t.providerMissing}
                   </span>
                 )}
@@ -1226,6 +1226,7 @@ function SettingsView(props: SettingsProps) {
                 <option value="groq">Groq</option>
                 <option value="gemini">Gemini</option>
                 <option value="nvidia">NVIDIA</option>
+                <option value="deepseek">DeepSeek</option>
               </select>
             </Field>
             <Field label={props.t.llmModel}>

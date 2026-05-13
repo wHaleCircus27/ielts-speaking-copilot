@@ -4,6 +4,9 @@ import type { AppSettings, AsrProvider, LlmProvider, TranscriptSegment } from '.
 
 type JsonRecord = Record<string, unknown>;
 
+const nvidiaLlmMaxOutputTokens = 16_384;
+const deepseekLlmMaxOutputTokens = 384_000;
+
 export class ProviderError extends Error {
   constructor(message: string) {
     super(message);
@@ -25,7 +28,8 @@ export function getProviderLabel(provider: AsrProvider | LlmProvider): string {
     openai: 'OpenAI',
     groq: 'Groq',
     gemini: 'Gemini',
-    nvidia: 'NVIDIA'
+    nvidia: 'NVIDIA',
+    deepseek: 'DeepSeek'
   };
 
   return labels[provider];
@@ -95,6 +99,11 @@ export async function* streamFeedback(
     return;
   }
 
+  if (settings.llmProvider === 'deepseek') {
+    yield* streamDeepseekFeedback(segments, settings);
+    return;
+  }
+
   yield* streamGeminiFeedback(segments, settings);
 }
 
@@ -152,6 +161,8 @@ export async function testLlmProviderConnection(
       ? 'https://api.groq.com/openai/v1/chat/completions'
       : provider === 'nvidia'
         ? 'https://integrate.api.nvidia.com/v1/chat/completions'
+        : provider === 'deepseek'
+          ? 'https://api.deepseek.com/chat/completions'
         : 'https://api.openai.com/v1/chat/completions';
   const response = await safeFetch(endpoint, {
     method: 'POST',
@@ -209,6 +220,10 @@ async function transcribeWithNvidia(
       model: settings.asrModel,
       messages: [
         {
+          role: 'system',
+          content: '/no_think'
+        },
+        {
           role: 'user',
           content: [
             {
@@ -226,6 +241,7 @@ async function transcribeWithNvidia(
         }
       ],
       max_tokens: 4096,
+      reasoning_budget: -1,
       temperature: 0,
       stream: false
     })
@@ -289,7 +305,21 @@ async function* streamNvidiaFeedback(
   yield* streamChatCompletions('https://integrate.api.nvidia.com/v1/chat/completions', settings.apiKeys.nvidia, {
     model: settings.llmModel,
     messages: buildFeedbackMessages(segments),
-    max_tokens: 900,
+    max_tokens: nvidiaLlmMaxOutputTokens,
+    temperature: 0.3,
+    stream: true
+  });
+}
+
+async function* streamDeepseekFeedback(
+  segments: TranscriptSegment[],
+  settings: AppSettings
+): AsyncGenerator<string> {
+  yield* streamChatCompletions('https://api.deepseek.com/chat/completions', settings.apiKeys.deepseek, {
+    model: settings.llmModel,
+    messages: buildFeedbackMessages(segments),
+    response_format: { type: 'json_object' },
+    max_tokens: deepseekLlmMaxOutputTokens,
     temperature: 0.3,
     stream: true
   });
@@ -448,7 +478,7 @@ export function normalizeTranscriptionResponse(response: unknown): TranscriptSeg
 }
 
 export function normalizeNvidiaTranscriptionText(text: string, duration: number | null): TranscriptSegment[] {
-  const cleaned = text
+  const cleaned = stripNvidiaAsrPreamble(text)
     .replace(/^transcript\s*:\s*/i, '')
     .replace(/^spoken transcript\s*:\s*/i, '')
     .trim();
@@ -467,6 +497,23 @@ export function normalizeNvidiaTranscriptionText(text: string, duration: number 
   ];
 }
 
+function stripNvidiaAsrPreamble(text: string): string {
+  let cleaned = text.trim();
+  const markerMatch = cleaned.match(/(?:let'?s check the text|the transcript is|transcript follows)\s*:\s*/i);
+  if (markerMatch?.index !== undefined) {
+    cleaned = cleaned.slice(markerMatch.index + markerMatch[0].length).trim();
+  }
+
+  cleaned = cleaned
+    .replace(/^the first part is the speaker saying\s+["“]?/i, '')
+    .replace(/^the speaker (?:says|is saying)\s+["“]?/i, '')
+    .replace(/^the audio says\s+["“]?/i, '')
+    .replace(/["”]\s*$/i, '')
+    .trim();
+
+  return cleaned;
+}
+
 function extractChatCompletionText(data: JsonRecord): string {
   const choice = asArray(data.choices)[0] as JsonRecord | undefined;
   const message = choice?.message as JsonRecord | undefined;
@@ -481,6 +528,14 @@ function extractChatCompletionText(data: JsonRecord): string {
       .map((part) => ((part as JsonRecord).text))
       .filter((text): text is string => typeof text === 'string')
       .join('');
+  }
+
+  if (typeof message?.reasoning_content === 'string') {
+    return message.reasoning_content;
+  }
+
+  if (typeof message?.reasoning === 'string') {
+    return message.reasoning;
   }
 
   return '';
@@ -505,7 +560,7 @@ function buildFeedbackMessages(segments: TranscriptSegment[]) {
     {
       role: 'system',
       content:
-        'You are an IELTS speaking teacher. Return only valid JSON. Write concise, actionable feedback in Simplified Chinese.'
+        'You are an IELTS speaking teacher. Return only valid JSON. Write concise, actionable feedback in Simplified Chinese. Keep each evidence and suggestion short, and keep feedbackMarkdown compact.'
     },
     {
       role: 'user',

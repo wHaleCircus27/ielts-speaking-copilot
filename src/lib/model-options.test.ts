@@ -9,6 +9,7 @@ import {
   isKnownLlmModel,
   llmModelOptions,
   normalizeLlmModel,
+  recommendedDeepseekLlmModel,
   recommendedNvidiaLlmModel
 } from './model-options';
 
@@ -35,6 +36,7 @@ describe('llm model options', () => {
   it('uses provider-specific defaults', () => {
     expect(getDefaultLlmModel('mock')).toBe('mock-feedback');
     expect(getDefaultLlmModel('nvidia')).toBe(recommendedNvidiaLlmModel);
+    expect(getDefaultLlmModel('deepseek')).toBe(recommendedDeepseekLlmModel);
   });
 
   it('includes verified NVIDIA API catalog model ids', () => {
@@ -57,5 +59,13 @@ describe('llm model options', () => {
     expect(options.some((option) => option.value === 'custom/provider-model')).toBe(false);
     expect(isKnownLlmModel('nvidia', 'meta/llama-3.3-70b-instruct')).toBe(true);
     expect(isKnownLlmModel('nvidia', 'custom/provider-model')).toBe(false);
+  });
+
+  it('includes DeepSeek chat completion model ids without adding ASR options', () => {
+    const values = getLlmModelOptions('deepseek').map((option) => option.value);
+    expect(values).toEqual(['deepseek-v4-flash', 'deepseek-v4-pro']);
+    expect(isKnownLlmModel('deepseek', 'deepseek-v4-flash')).toBe(true);
+    expect(isKnownLlmModel('deepseek', 'deepseek-ai/deepseek-v4-flash')).toBe(false);
+    expect(Object.keys(asrModelOptions)).not.toContain('deepseek');
   });
 });

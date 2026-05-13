@@ -8,9 +8,9 @@ The V0.2 project folder contains:
 - Next.js + React + Tailwind source files.
 - A Tauri v2 shell with a minimal Rust command.
 - A desktop workspace UI for local media import, playback, timestamped transcript interaction, editable transcript segments, IELTS scorecard display, generated feedback editing, local text-only history, and copy output.
-- A provider facade for Mock/OpenAI/Groq/NVIDIA ASR and Mock/OpenAI/Groq/Gemini/NVIDIA LLM.
+- A provider facade for Mock/OpenAI/Groq/NVIDIA ASR and Mock/OpenAI/Groq/Gemini/NVIDIA/DeepSeek LLM.
 
-Mock flows still use local deterministic demo data in `src/lib/mock-ai.ts`. Real provider calls go through `src/lib/providers.ts`, so UI code should not call OpenAI, Groq, or Gemini directly.
+Mock flows still use local deterministic demo data in `src/lib/mock-ai.ts`. Real provider calls go through `src/lib/providers.ts`, so UI code should not call OpenAI, Groq, Gemini, NVIDIA, or DeepSeek directly.
 
 ## V0.2 Development Sync
 
@@ -23,19 +23,30 @@ Completed:
 - Added structured IELTS scorecard parsing and display with 0.1 band precision from 0 to 9.
 - Updated feedback prompting to request a JSON payload containing `scorecard` and `feedbackMarkdown`.
 - Added history search by file name, date/status metadata, transcript preview, and feedback preview.
+- Added a V0.2 development plan in `V0.2-DEVELOPMENT-PLAN.md`.
+- Added DeepSeek as an LLM-only provider. DeepSeek is intentionally not added to ASR because the V0.2 app requires audio transcription and the DeepSeek integration path is OpenAI-compatible chat completions.
 
 Validation:
 
-- `npm.cmd run test` passed with 9 test files and 38 tests.
+- `npm.cmd run test` passed with 9 test files and 44 tests after adding DeepSeek and NVIDIA ASR response-shape coverage.
 - `npm.cmd run typecheck` passed.
 - `npm.cmd run build` passed with Next.js static export.
 - `cargo check` passed for the Tauri shell.
+- DeepSeek live smoke with the local key returned HTTP 200 for `deepseek-v4-flash`; streaming feedback returned parseable `scorecard` and `feedbackMarkdown`. The key value was not printed or written to docs/logs.
+- Tauri desktop verification started successfully through `npm.cmd run tauri:dev`; the desktop shell loaded the app from `http://127.0.0.1:3000` with HTTP 200.
+- User desktop walkthrough passed for the Mock-ASR-to-feedback path after switching away from NVIDIA ASR: feedback generation, editing/copy continuation, history save, history search, and history delete all worked.
+- DeepSeek feedback parse failure after NVIDIA ASR was reproduced as output truncation: `max_tokens: 900` returned `finish_reason: length` and an unclosed JSON object for the local NVIDIA transcript. DeepSeek feedback now uses the documented DeepSeek V4 maximum output budget, `max_tokens: 384000`; a minimal live request with that budget returned HTTP 200 and valid JSON.
+- NVIDIA LLM feedback now uses `max_tokens: 16384`, matching the documented `deepseek-ai/deepseek-v4-flash` NVIDIA endpoint range/default.
 
 Remaining manual checks:
 
-- Full desktop walkthrough for save/reopen/search/delete history in the Tauri shell.
-- Real provider feedback quality check for strict JSON scorecard output.
+- Confirm history reopen specifically after the latest DeepSeek changes if it was not part of the walkthrough.
+- Real provider feedback quality check for strict JSON scorecard output beyond the DeepSeek smoke path.
 - Re-run V0.1 real provider/keyring checks before release.
+
+Known provider notes:
+
+- NVIDIA ASR investigation found that the OpenAI-compatible endpoint can return the transcript in `message.reasoning_content` with `message.content: null`; the adapter now sends `/no_think`, sets `reasoning_budget: -1`, falls back to `reasoning_content`/`reasoning`, and strips common NVIDIA ASR reasoning preambles.
 
 ## Environment
 
@@ -63,24 +74,26 @@ cargo check
 
 ## Provider Matrix
 
-| Capability | Mock | OpenAI | Groq | Gemini | NVIDIA |
-| --- | --- | --- | --- | --- | --- |
-| ASR transcription | Yes | Yes | Yes | Not enabled in V0.1 | Yes |
-| Timestamped segments | Demo data | Via transcription response | Via transcription response | Not enabled in V0.1 | Single full-length segment fallback |
-| LLM feedback | Demo data | Chat Completions streaming | Chat Completions streaming | `streamGenerateContent` SSE | OpenAI-compatible streaming |
-| API key required | No | Yes | Yes | Yes | Yes |
+| Capability | Mock | OpenAI | Groq | Gemini | NVIDIA | DeepSeek |
+| --- | --- | --- | --- | --- | --- | --- |
+| ASR transcription | Yes | Yes | Yes | Not enabled in V0.1 | Yes | No |
+| Timestamped segments | Demo data | Via transcription response | Via transcription response | Not enabled in V0.1 | Single full-length segment fallback | No ASR path |
+| LLM feedback | Demo data | Chat Completions streaming | Chat Completions streaming | `streamGenerateContent` SSE | OpenAI-compatible streaming | OpenAI-compatible streaming |
+| API key required | No | Yes | Yes | Yes | Yes | Yes |
 
 NVIDIA is also supported for LLM feedback through the OpenAI-compatible endpoint `https://integrate.api.nvidia.com/v1/chat/completions`; the default/recommended model is `deepseek-ai/deepseek-v4-flash`.
+
+DeepSeek is supported for LLM feedback through the OpenAI-compatible endpoint `https://api.deepseek.com/chat/completions`; the default model is `deepseek-v4-flash`, with `deepseek-v4-pro` available as an optional model. DeepSeek requests use JSON object mode for the IELTS scorecard payload and the documented DeepSeek V4 maximum output budget.
 
 An NVIDIA smoke test with the provided API key returned the expected `provider-ok` response. Do not commit API keys or paste them into logs.
 
 API keys are no longer saved in browser localStorage. In the Tauri desktop shell they are persisted through the operating system secure credential store via the Rust `keyring` crate. Older V0.1 `api-keys.local.json` files are read for migration into secure storage.
 
-Provider requests still use the frontend facade, but real HTTP calls now prefer `@tauri-apps/plugin-http` in the desktop shell. Web-only development can still use Mock provider without API keys or network. The Tauri HTTP permission scope is limited to OpenAI, Groq, Gemini, and NVIDIA endpoints.
+Provider requests still use the frontend facade, but real HTTP calls now prefer `@tauri-apps/plugin-http` in the desktop shell. Web-only development can still use Mock provider without API keys or network. The Tauri HTTP permission scope is limited to OpenAI, Groq, Gemini, NVIDIA, and DeepSeek endpoints.
 
-ASR and LLM model selection are provider-specific and rendered as dropdowns. ASR supports Mock, OpenAI, Groq, and NVIDIA options. NVIDIA ASR uses the hosted OpenAI-compatible chat completions endpoint with `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` and audio input. Because that hosted path returns plain transcript text rather than native timestamped ASR segments, V0.1 converts it into one full-length `TranscriptSegment` so the media, transcript, and feedback workflow remains usable. LLM supports Mock, OpenAI, Groq, Gemini, and NVIDIA options. NVIDIA LLM options are curated from the NVIDIA API Catalog `/v1/models`; `deepseek-ai/deepseek-v4-flash` is listed first because it passed the Simplified Chinese feedback smoke test. Older stored NVIDIA choices known to produce bad Chinese output or unstable latency (`meta/llama-3.3-70b-instruct` and `deepseek-ai/deepseek-v4-pro`) are migrated back to the recommended Flash model.
+ASR and LLM model selection are provider-specific and rendered as dropdowns. ASR supports Mock, OpenAI, Groq, and NVIDIA options. NVIDIA ASR uses the hosted OpenAI-compatible chat completions endpoint with `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` and audio input. Because that hosted path returns plain transcript text rather than native timestamped ASR segments, V0.1 converts it into one full-length `TranscriptSegment` so the media, transcript, and feedback workflow remains usable. LLM supports Mock, OpenAI, Groq, Gemini, NVIDIA, and DeepSeek options. NVIDIA LLM options are curated from the NVIDIA API Catalog `/v1/models`; `deepseek-ai/deepseek-v4-flash` is listed first because it passed the Simplified Chinese feedback smoke test. Older stored NVIDIA choices known to produce bad Chinese output or unstable latency (`meta/llama-3.3-70b-instruct` and `deepseek-ai/deepseek-v4-pro`) are migrated back to the recommended Flash model.
 
-Configuration readiness is split by capability. Transcription checks ASR provider/model/API key before starting, and feedback generation checks LLM provider/model/API key before streaming. OpenAI, Groq, and NVIDIA API keys are shared by ASR and LLM requests for the same provider.
+Configuration readiness is split by capability. Transcription checks ASR provider/model/API key before starting, and feedback generation checks LLM provider/model/API key before streaming. OpenAI, Groq, and NVIDIA API keys are shared by ASR and LLM requests for the same provider; DeepSeek keys are used only for LLM feedback.
 
 Desktop API keys are stored through the OS secure credential store. On macOS, first use may show a Keychain access prompt for `com.ieltsspeaking.copilot.api-key`. On Windows, the `keyring` crate uses the Windows-native credential backend. Web-only development does not have Tauri command access, so real provider key persistence is only intended for the desktop shell; Mock mode remains usable without keys or network.
 
@@ -96,7 +109,7 @@ Completed:
 - Added visible API Key inputs for all currently selected non-Mock ASR/LLM providers, with shared-key copy for providers used by both capabilities.
 - Added strict model normalization so older custom model strings are not kept as active dropdown values.
 - Updated the NVIDIA LLM default/recommended model to `deepseek-ai/deepseek-v4-flash`; stored NVIDIA `meta/llama-3.3-70b-instruct` and `deepseek-ai/deepseek-v4-pro` selections now migrate to Flash.
-- Added conservative NVIDIA feedback generation limits: `max_tokens: 900` and `temperature: 0.3`.
+- Added NVIDIA feedback generation settings. The current output budget is `max_tokens: 16384` with `temperature: 0.3`, matching the documented `deepseek-ai/deepseek-v4-flash` endpoint range/default.
 - Updated NVIDIA connection testing to call the same OpenAI-compatible chat completions endpoint used by feedback generation, with the currently selected model.
 - Verified the provided NVIDIA API key against `https://integrate.api.nvidia.com/v1/chat/completions` without logging or committing the key.
 - Verified all curated NVIDIA dropdown models with a minimal non-streaming chat completion request.

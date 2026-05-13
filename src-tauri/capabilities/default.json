@@ -12,7 +12,8 @@
         { "url": "https://api.openai.com/*" },
         { "url": "https://api.groq.com/*" },
         { "url": "https://generativelanguage.googleapis.com/*" },
-        { "url": "https://integrate.api.nvidia.com/*" }
+        { "url": "https://integrate.api.nvidia.com/*" },
+        { "url": "https://api.deepseek.com/*" }
       ]
     }
   ]

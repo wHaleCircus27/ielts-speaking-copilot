@@ -1,7 +1,7 @@
 import type { AppSettings } from './types';
 
 const SETTINGS_KEY = 'ielts-speaking-copilot.settings.v0.1';
-const apiKeyProviders = ['openai', 'groq', 'gemini', 'nvidia'] as const;
+const apiKeyProviders = ['openai', 'groq', 'gemini', 'nvidia', 'deepseek'] as const;
 
 export const defaultSettings: AppSettings = {
   asrProvider: 'mock',
@@ -18,7 +18,8 @@ export const defaultSettings: AppSettings = {
     openai: '',
     groq: '',
     gemini: '',
-    nvidia: ''
+    nvidia: '',
+    deepseek: ''
   },
   limits: {
     maxFileSizeMb: 25,

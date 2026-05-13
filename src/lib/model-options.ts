@@ -6,6 +6,7 @@ export type ModelOption = {
 };
 
 export const recommendedNvidiaLlmModel = 'deepseek-ai/deepseek-v4-flash';
+export const recommendedDeepseekLlmModel = 'deepseek-v4-flash';
 
 const legacyNvidiaLlmModelsToMigrate = new Set([
   'meta/llama-3.3-70b-instruct',
@@ -42,6 +43,10 @@ export const llmModelOptions: Record<LlmProvider, ModelOption[]> = {
     { label: 'DeepSeek V4 Pro', value: 'deepseek-ai/deepseek-v4-pro' },
     { label: 'GPT OSS 120B', value: 'openai/gpt-oss-120b' },
     { label: 'GPT OSS 20B', value: 'openai/gpt-oss-20b' }
+  ],
+  deepseek: [
+    { label: 'DeepSeek V4 Flash', value: recommendedDeepseekLlmModel },
+    { label: 'DeepSeek V4 Pro', value: 'deepseek-v4-pro' }
   ]
 };
 

@@ -4,7 +4,7 @@ use keyring::Entry;
 use tauri::{AppHandle, Manager};
 
 const KEYRING_SERVICE: &str = "com.ieltsspeaking.copilot.api-key";
-const API_KEY_PROVIDERS: [&str; 4] = ["openai", "groq", "gemini", "nvidia"];
+const API_KEY_PROVIDERS: [&str; 5] = ["openai", "groq", "gemini", "nvidia", "deepseek"];
 
 #[tauri::command]
 fn health() -> &'static str {

@@ -51,6 +51,24 @@ describe('normalizeNvidiaTranscriptionText', () => {
     ]);
   });
 
+  it('removes NVIDIA reasoning preambles before creating the transcript segment', () => {
+    expect(
+      normalizeNvidiaTranscriptionText(
+        `So, the correct answer is to output only the spoken transcript. Let's check the text:
+
+The first part is the speaker saying "Part two now. Give you your question."`,
+        20
+      )
+    ).toEqual([
+      {
+        id: 'segment-1',
+        start: 0,
+        end: 20,
+        text: 'Part two now. Give you your question.'
+      }
+    ]);
+  });
+
   it('throws a readable error for empty NVIDIA ASR output', () => {
     expect(() => normalizeNvidiaTranscriptionText(' ', 10)).toThrow(ProviderError);
   });
@@ -72,7 +90,8 @@ describe('NVIDIA ASR', () => {
         openai: '',
         groq: '',
         gemini: '',
-        nvidia: 'nvapi-test'
+        nvidia: 'nvapi-test',
+        deepseek: ''
       }
     };
 
@@ -91,6 +110,48 @@ describe('NVIDIA ASR', () => {
       })
     );
     expect(fetchMock.mock.calls[0][1]?.body as string).toContain('data:audio/wav;base64,');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual(expect.objectContaining({
+      reasoning_budget: -1
+    }));
+  });
+
+  it('uses NVIDIA reasoning_content as the transcript when content is null', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: null,
+              reasoning_content: 'So part two now. Could you describe someone you like to spend time with?'
+            }
+          }
+        ]
+      }), { status: 200 })
+    );
+    const file = new File(['demo audio'], 'answer.wav', { type: 'audio/wav' });
+    const settings = {
+      ...defaultSettings,
+      asrProvider: 'nvidia' as const,
+      asrModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+      apiKeys: {
+        openai: '',
+        groq: '',
+        gemini: '',
+        nvidia: 'nvapi-test',
+        deepseek: ''
+      }
+    };
+
+    const segments = await transcribeAudio(file, settings, 12);
+
+    expect(segments).toEqual([
+      {
+        id: 'segment-1',
+        start: 0,
+        end: 12,
+        text: 'So part two now. Could you describe someone you like to spend time with?'
+      }
+    ]);
   });
 });
 
@@ -107,7 +168,8 @@ describe('NVIDIA feedback', () => {
         openai: '',
         groq: '',
         gemini: '',
-        nvidia: 'nvapi-test'
+        nvidia: 'nvapi-test',
+        deepseek: ''
       }
     };
 
@@ -120,7 +182,52 @@ describe('NVIDIA feedback', () => {
     expect(chunks).toEqual(['ok']);
     expect(body).toEqual(expect.objectContaining({
       model: 'deepseek-ai/deepseek-v4-flash',
-      max_tokens: 900,
+      max_tokens: 16384,
+      temperature: 0.3,
+      stream: true
+    }));
+  });
+});
+
+describe('DeepSeek feedback', () => {
+  it('streams through the DeepSeek chat completions endpoint with JSON object mode', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"ok","reasoning_content":"ignored"}}]}\n\ndata: [DONE]\n\n', { status: 200 })
+    );
+    const settings = {
+      ...defaultSettings,
+      llmProvider: 'deepseek' as const,
+      llmModel: 'deepseek-v4-flash',
+      apiKeys: {
+        openai: '',
+        groq: '',
+        gemini: '',
+        nvidia: '',
+        deepseek: 'deepseek-test'
+      }
+    };
+
+    const chunks = [];
+    for await (const chunk of streamFeedback([{ id: 'segment-1', start: 0, end: 4, text: 'I like studying English.' }], settings)) {
+      chunks.push(chunk);
+    }
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.deepseek.com/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer deepseek-test',
+          'Content-Type': 'application/json'
+        })
+      })
+    );
+    expect(chunks).toEqual(['ok']);
+    expect(body).toEqual(expect.objectContaining({
+      model: 'deepseek-v4-flash',
+      response_format: { type: 'json_object' },
+      max_tokens: 384000,
       temperature: 0.3,
       stream: true
     }));
@@ -150,7 +257,8 @@ describe('generateFeedbackDraft', () => {
         openai: 'sk-test',
         groq: '',
         gemini: '',
-        nvidia: ''
+        nvidia: '',
+        deepseek: ''
       }
     };
 
@@ -208,6 +316,24 @@ describe('testLlmProviderConnection', () => {
           'Content-Type': 'application/json'
         }),
         body: expect.stringContaining('deepseek-ai/deepseek-v4-flash')
+      })
+    );
+  });
+
+  it('checks DeepSeek through the official chat completions endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+
+    await testLlmProviderConnection('deepseek', 'deepseek-test', 'deepseek-v4-flash');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.deepseek.com/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer deepseek-test',
+          'Content-Type': 'application/json'
+        }),
+        body: expect.stringContaining('deepseek-v4-flash')
       })
     );
   });

@@ -23,7 +23,8 @@ describe('buildReviewRecord', () => {
           openai: 'secret-openai',
           groq: '',
           gemini: '',
-          nvidia: ''
+          nvidia: '',
+          deepseek: ''
         }
       }
     }, new Date('2026-05-13T00:00:00.000Z'));

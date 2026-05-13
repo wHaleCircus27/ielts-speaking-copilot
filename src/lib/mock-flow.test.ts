@@ -11,7 +11,8 @@ describe('Mock provider flow', () => {
         openai: '',
         groq: '',
         gemini: '',
-        nvidia: ''
+        nvidia: '',
+        deepseek: ''
       }
     };
 

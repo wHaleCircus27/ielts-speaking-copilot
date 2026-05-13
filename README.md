@@ -33,15 +33,16 @@ npm.cmd run tauri:dev
 ## Provider Support
 
 - ASR: Mock, OpenAI, Groq, NVIDIA
-- LLM: Mock, OpenAI, Groq, Gemini, NVIDIA
+- LLM: Mock, OpenAI, Groq, Gemini, NVIDIA, DeepSeek
 - Gemini audio understanding is not used as the primary V0.1 ASR path because V0.1 needs stable timestamped transcript segments.
 - NVIDIA uses the OpenAI-compatible NIM/API Catalog endpoint at `https://integrate.api.nvidia.com/v1/chat/completions`.
 - NVIDIA ASR uses the hosted audio-capable chat completions path and normalizes the returned transcript into one full-length `TranscriptSegment` in V0.1. This keeps the desktop workflow usable, but it is not a fine-grained timestamped ASR path.
 - NVIDIA LLM defaults to `deepseek-ai/deepseek-v4-flash` for Simplified Chinese IELTS feedback. Older stored NVIDIA selections that failed quality/stability checks are migrated to that model.
+- DeepSeek is supported as an LLM-only provider through the OpenAI-compatible endpoint `https://api.deepseek.com/chat/completions`. The default model is `deepseek-v4-flash`, with `deepseek-v4-pro` available as an optional model. DeepSeek is not shown as an ASR provider because the V0.2 workflow needs audio transcription and DeepSeek's public API path here is chat completions. DeepSeek feedback uses the documented DeepSeek V4 maximum output budget to avoid truncated JSON scorecards.
 
 API keys are no longer written to browser `localStorage`. In the Tauri desktop shell they are stored through the operating system secure credential store via the Rust `keyring` crate. Older V0.1 `api-keys.local.json` files are read for migration into secure storage.
 
-Real provider calls still go through the frontend provider facade, but the facade now prefers the Tauri HTTP plugin in the desktop shell and falls back to browser `fetch` for web-only Mock/dev paths. Web development is intended mainly for the Mock provider flow; real API key persistence and provider calls should be verified in the Tauri desktop shell. The HTTP permission scope is limited to the configured provider domains.
+Real provider calls still go through the frontend provider facade, but the facade now prefers the Tauri HTTP plugin in the desktop shell and falls back to browser `fetch` for web-only Mock/dev paths. Web development is intended mainly for the Mock provider flow; real API key persistence and provider calls should be verified in the Tauri desktop shell. The HTTP permission scope is limited to the configured provider domains, including DeepSeek.
 
 ## Project Context
 
