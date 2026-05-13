@@ -52,14 +52,14 @@ describe('normalizeNvidiaTranscriptionText', () => {
   });
 
   it('removes NVIDIA reasoning preambles before creating the transcript segment', () => {
-    expect(
-      normalizeNvidiaTranscriptionText(
-        `So, the correct answer is to output only the spoken transcript. Let's check the text:
+    const segments = normalizeNvidiaTranscriptionText(
+      `So, the correct answer is to output only the spoken transcript. Let's check the text:
 
 The first part is the speaker saying "Part two now. Give you your question."`,
-        20
-      )
-    ).toEqual([
+      20
+    );
+
+    expect(segments).toEqual([
       {
         id: 'segment-1',
         start: 0,

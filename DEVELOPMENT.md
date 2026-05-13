@@ -46,7 +46,7 @@ Remaining manual checks:
 
 Known provider notes:
 
-- NVIDIA ASR investigation found that the OpenAI-compatible endpoint can return the transcript in `message.reasoning_content` with `message.content: null`; the adapter now sends `/no_think`, sets `reasoning_budget: -1`, falls back to `reasoning_content`/`reasoning`, and strips common NVIDIA ASR reasoning preambles.
+- NVIDIA ASR investigation found that the OpenAI-compatible endpoint can return the transcript in `message.reasoning_content` with `message.content: null`; the adapter now sends `/no_think`, sets `reasoning_budget: -1`, falls back to `reasoning_content`/`reasoning`, and strips common NVIDIA ASR reasoning preambles. NVIDIA remains a single full-length segment fallback until timestamp alignment is revisited.
 
 ## Environment
 
