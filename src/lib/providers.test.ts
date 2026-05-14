@@ -272,6 +272,31 @@ describe('generateFeedbackDraft', () => {
     expect(prompt).toContain('overallBand');
     expect(prompt).toContain('fluencyCoherence');
   });
+
+  it('preserves raw streamed output when scorecard JSON cannot be parsed', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"## 总评\\n\\nOnly markdown"}}]}\n\ndata: [DONE]\n\n', { status: 200 })
+    );
+    const settings = {
+      ...defaultSettings,
+      llmProvider: 'openai' as const,
+      llmModel: 'gpt-4o-mini',
+      apiKeys: {
+        openai: 'sk-test',
+        groq: '',
+        gemini: '',
+        nvidia: '',
+        deepseek: ''
+      }
+    };
+
+    const result = await generateFeedbackDraft([{ id: 'segment-1', start: 0, end: 3, text: 'I enjoy reading.' }], settings);
+
+    expect(result.scorecard).toBeNull();
+    expect(result.parseError).toContain('评分表解析失败');
+    expect(result.raw).toContain('Only markdown');
+    expect(result.feedback).toContain('Only markdown');
+  });
 });
 
 describe('parseSseEvent', () => {

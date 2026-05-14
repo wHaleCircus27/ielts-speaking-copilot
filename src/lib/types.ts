@@ -59,6 +59,8 @@ export type MediaJob = {
 export type FeedbackDraft = {
   content: string;
   aiContent?: string;
+  parseError?: string | null;
+  rawContent?: string;
   source: 'ai' | 'edited';
 };
 
@@ -92,6 +94,8 @@ export type ReviewJobSummary = {
   fileSize: number;
   duration: number | null;
   status: JobStatus;
+  lastErrorMessage?: string | null;
+  overallBand?: number | null;
   createdAt: string;
   updatedAt: string;
   providerSnapshot: ProviderSnapshot;

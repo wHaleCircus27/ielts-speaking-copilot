@@ -34,6 +34,8 @@ export function buildReviewRecord(payload: ReviewPayload, now = new Date()): Rev
     fileSize: payload.job.fileSize,
     duration: payload.job.duration,
     status: payload.job.status,
+    lastErrorMessage: payload.job.errorMessage,
+    overallBand: payload.scorecard?.overallBand ?? null,
     createdAt,
     updatedAt,
     providerSnapshot: {
@@ -61,8 +63,14 @@ export function searchReviews(reviews: ReviewJobSummary[], query: string): Revie
       review.fileName,
       review.fileType,
       review.status,
+      review.lastErrorMessage,
+      review.overallBand,
       review.createdAt,
       review.updatedAt,
+      review.providerSnapshot?.asrProvider,
+      review.providerSnapshot?.asrModel,
+      review.providerSnapshot?.llmProvider,
+      review.providerSnapshot?.llmModel,
       review.transcriptPreview,
       review.feedbackPreview
     ]

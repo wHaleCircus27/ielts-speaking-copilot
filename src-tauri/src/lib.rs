@@ -60,6 +60,8 @@ fn review_summary(review: &serde_json::Value) -> serde_json::Value {
         "fileSize",
         "duration",
         "status",
+        "lastErrorMessage",
+        "overallBand",
         "createdAt",
         "updatedAt",
         "providerSnapshot",

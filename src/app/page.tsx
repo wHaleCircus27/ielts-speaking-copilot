@@ -11,6 +11,7 @@ import {
 } from '@/lib/providers';
 import { buildReviewRecord, deleteReview, listReviews, loadReview, saveReview, searchReviews, toMediaJob } from '@/lib/history';
 import { findActiveSegmentId, seekPlayerToSegment } from '@/lib/playback';
+import { buildProviderDiagnostics, hasConfiguredProviderKey } from '@/lib/provider-diagnostics';
 import { formatBand, scorecardMetricLabels } from '@/lib/scorecard';
 import {
   getAsrModelOptions,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/model-options';
 import { describeMissingConfig, getSettingsReadiness } from '@/lib/settings-validation';
 import { defaultSettings, loadSettings, saveSettings } from '@/lib/storage';
+import type { ProviderDiagnosticResult } from '@/lib/provider-diagnostics';
 import type { SettingsReadiness } from '@/lib/settings-validation';
 import type { AppSettings, AsrProvider, FeedbackDraft, JobStatus, LlmProvider, MediaJob, ReviewJobRecord, ReviewJobSummary, Scorecard, ScorecardMetricKey, TranscriptSegment } from '@/lib/types';
 
@@ -106,7 +108,12 @@ const copy = {
     loadedReviewMessage: '已打开历史记录。若需复听，请重新选择原媒体文件。',
     deletedReviewMessage: '历史记录已删除。',
     noMediaInHistory: '历史记录不保存原始媒体文件。需要复听时请重新选择原文件。',
+    reboundMediaMessage: '已重新绑定原媒体文件，可继续复听并点击转录片段定位播放。',
+    restoredReviewMessage: '已恢复历史文本结果；如需复听，请重新选择原媒体文件。',
     feedbackPlaceholder: 'AI 反馈会显示在这里。你可以在生成后直接编辑最终版本。',
+    parseRecoveryTitle: '评分表解析未完成',
+    parseRecoveryHelp: '已保留模型原始输出，可编辑当前文本或重新生成评分卡。',
+    regenerateScorecard: '重新生成评分卡',
     appearance: 'Appearance',
     appearanceHelp: '调整工作台的字体、字号、主题色和界面语言。',
     font: '字体',
@@ -115,6 +122,13 @@ const copy = {
     language: '界面语言',
     providerSettings: 'Provider Settings',
     providerHelp: '分别配置 ASR 与 LLM。OpenAI、Groq、NVIDIA 的 ASR 和 LLM 会共用对应 provider 的 API Key；DeepSeek 仅用于 LLM 批改。',
+    diagnostics: 'Provider Diagnostics',
+    diagnosticsHelp: '检查 ASR、LLM、桌面 HTTP 和系统凭据存储状态。不会显示 API Key。',
+    runtimeReady: '桌面路径可用',
+    runtimeMissing: '请使用 Tauri 桌面壳验证真实 provider',
+    keyConfigured: 'API Key 已配置',
+    keyMissing: 'API Key 未配置',
+    lastConnectionTest: '最近连接测试',
     asrProvider: 'ASR 提供商',
     asrModel: 'ASR 模型',
     llmProvider: 'LLM 提供商',
@@ -130,6 +144,7 @@ const copy = {
     secureLocalStorage: '桌面端会保存到系统安全凭据存储',
     testOk: (provider: string) => `${provider} 连接测试成功。`,
     testFail: (provider: string, reason: string) => `${provider} 连接测试失败：${reason}`,
+    testSkipped: (provider: string, reason: string) => `${provider} 连接测试未执行：${reason}`,
     mockOk: 'Mock provider 不需要 API Key，连接测试通过。',
     needApiKey: (provider: string) => `请先填写 ${provider} API Key。`,
     asrReady: 'ASR Ready',
@@ -220,7 +235,12 @@ const copy = {
     loadedReviewMessage: 'Review opened. Re-select the original media file if playback is needed.',
     deletedReviewMessage: 'Review deleted.',
     noMediaInHistory: 'History does not store original media. Re-select the file to replay it.',
+    reboundMediaMessage: 'Original media rebound. Playback and transcript click-to-seek are available again.',
+    restoredReviewMessage: 'Text results restored from history. Re-select the original media file to replay.',
     feedbackPlaceholder: 'AI feedback appears here. You can edit the final version after generation.',
+    parseRecoveryTitle: 'Scorecard parse incomplete',
+    parseRecoveryHelp: 'The raw model output was preserved. Edit the current text or regenerate the scorecard.',
+    regenerateScorecard: 'Regenerate scorecard',
     appearance: 'Appearance',
     appearanceHelp: 'Adjust font, font size, theme color, and interface language.',
     font: 'Font',
@@ -229,6 +249,13 @@ const copy = {
     language: 'Interface language',
     providerSettings: 'Provider Settings',
     providerHelp: 'Configure ASR and LLM separately. OpenAI, Groq, and NVIDIA share provider keys across ASR/LLM; DeepSeek is LLM-only.',
+    diagnostics: 'Provider Diagnostics',
+    diagnosticsHelp: 'Checks ASR, LLM, desktop HTTP, and OS credential storage without showing API keys.',
+    runtimeReady: 'Desktop path available',
+    runtimeMissing: 'Use the Tauri desktop shell to verify real providers',
+    keyConfigured: 'API Key configured',
+    keyMissing: 'API Key missing',
+    lastConnectionTest: 'Last connection test',
     asrProvider: 'ASR Provider',
     asrModel: 'ASR Model',
     llmProvider: 'LLM Provider',
@@ -244,6 +271,7 @@ const copy = {
     secureLocalStorage: 'Stored in desktop secure credential storage',
     testOk: (provider: string) => `${provider} connection test succeeded.`,
     testFail: (provider: string, reason: string) => `${provider} connection test failed: ${reason}`,
+    testSkipped: (provider: string, reason: string) => `${provider} connection test skipped: ${reason}`,
     mockOk: 'Mock provider needs no API key. Connection test passed.',
     needApiKey: (provider: string) => `Please enter the ${provider} API Key first.`,
     asrReady: 'ASR Ready',
@@ -351,10 +379,16 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [lastProviderTest, setLastProviderTest] = useState<ProviderDiagnosticResult | null>(null);
 
   const lang = settings.appearance.language;
   const t = copy[lang];
   const readiness = useMemo(() => getSettingsReadiness(settings), [settings]);
+  const isDesktopRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const providerDiagnostics = useMemo(
+    () => buildProviderDiagnostics(settings, readiness, { isDesktop: isDesktopRuntime }),
+    [settings, readiness, isDesktopRuntime]
+  );
   const settingsReady = readiness.ready;
   const status = job?.status ?? 'idle';
   const isBusy = status === 'transcribing' || status === 'generating';
@@ -456,25 +490,62 @@ export default function Home() {
   async function testProviderConnection() {
     const provider = settings.llmProvider;
     const providerLabel = getProviderLabel(provider);
+    const checkedAt = new Date().toISOString();
 
     if (provider === 'mock') {
-      window.alert(t.mockOk);
+      const result = {
+        capability: 'LLM' as const,
+        provider,
+        model: settings.llmModel,
+        ready: true,
+        message: t.mockOk,
+        checkedAt
+      };
+      setLastProviderTest(result);
+      setMessage(result.message);
       return;
     }
 
     const apiKey = settings.apiKeys[provider].trim();
     if (!apiKey) {
-      window.alert(t.needApiKey(providerLabel));
+      const result = {
+        capability: 'LLM' as const,
+        provider,
+        model: settings.llmModel,
+        ready: false,
+        message: t.testSkipped(providerLabel, t.needApiKey(providerLabel)),
+        checkedAt
+      };
+      setLastProviderTest(result);
+      setMessage(result.message);
       return;
     }
 
     setIsTestingConnection(true);
     try {
       await testLlmProviderConnection(provider, apiKey, settings.llmModel);
-      window.alert(t.testOk(providerLabel));
+      const result = {
+        capability: 'LLM' as const,
+        provider,
+        model: settings.llmModel,
+        ready: true,
+        message: t.testOk(providerLabel),
+        checkedAt: new Date().toISOString()
+      };
+      setLastProviderTest(result);
+      setMessage(result.message);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Unknown error';
-      window.alert(t.testFail(providerLabel, reason));
+      const result = {
+        capability: 'LLM' as const,
+        provider,
+        model: settings.llmModel,
+        ready: false,
+        message: t.testFail(providerLabel, reason),
+        checkedAt: new Date().toISOString()
+      };
+      setLastProviderTest(result);
+      setMessage(result.message);
     } finally {
       setIsTestingConnection(false);
     }
@@ -497,6 +568,27 @@ export default function Home() {
     }
 
     const nextUrl = URL.createObjectURL(file);
+    const shouldRebindExistingReview = Boolean(job && !fileUrl && file.name === job.fileName && (segments.length > 0 || feedback.content.trim()));
+    if (shouldRebindExistingReview && job) {
+      const nextJob = {
+        ...job,
+        fileType: file.type || job.fileType,
+        fileSize: file.size,
+        duration: null,
+        errorMessage: null
+      };
+      setMediaFile(file);
+      setFileUrl(nextUrl);
+      setMediaKind(file.type.startsWith('video/') ? 'video' : 'audio');
+      setJob(nextJob);
+      setActiveSegmentId(null);
+      setCopied(false);
+      runIdRef.current += 1;
+      void persistReview({ job: nextJob });
+      setMessage(t.reboundMediaMessage);
+      return;
+    }
+
     setMediaFile(file);
     setFileUrl(nextUrl);
     setMediaKind(file.type.startsWith('video/') ? 'video' : 'audio');
@@ -629,7 +721,13 @@ export default function Home() {
       });
       if (runId !== runIdRef.current) return;
       const content = result.scorecard ? result.feedback : result.raw;
-      const nextFeedback = { content, aiContent: content, source: 'ai' as const };
+      const nextFeedback = {
+        content,
+        aiContent: content,
+        rawContent: result.raw,
+        parseError: result.parseError,
+        source: 'ai' as const
+      };
       const nextJob = job ? { ...job, status: result.parseError ? 'transcribed' as const : 'ready' as const, errorMessage: result.parseError } : null;
       setFeedback(nextFeedback);
       setScorecard(result.scorecard);
@@ -680,7 +778,7 @@ export default function Home() {
     setCopied(false);
     runIdRef.current += 1;
     setCurrentPage('workspace');
-    setMessage(t.loadedReviewMessage);
+    setMessage(t.restoredReviewMessage);
   }
 
   async function removeReview(id: string) {
@@ -828,6 +926,8 @@ export default function Home() {
                 handleLlmProviderChange={handleLlmProviderChange}
                 handleSettingsChange={handleSettingsChange}
                 isTestingConnection={isTestingConnection}
+                lastProviderTest={lastProviderTest}
+                providerDiagnostics={providerDiagnostics}
                 readiness={readiness}
                 settings={settings}
                 settingsReady={settingsReady}
@@ -1000,8 +1100,22 @@ function WorkspaceView(props: WorkspaceProps) {
               {props.status === 'generating' && !props.feedback.content ? (
                 <div className="absolute inset-0 z-10 bg-slate-950/35 backdrop-blur-sm"><LoadingPanel label="Generating critique..." fill /></div>
               ) : null}
+              {props.feedback.parseError ? (
+                <div className="absolute left-4 right-4 top-4 z-10 rounded-2xl border border-amber-300/20 bg-amber-500/15 p-3 text-xs text-amber-100 shadow-xl backdrop-blur">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold">{props.t.parseRecoveryTitle}</p>
+                      <p className="mt-1 leading-5 text-amber-100/75">{props.feedback.parseError}</p>
+                      <p className="mt-1 leading-5 text-amber-100/60">{props.t.parseRecoveryHelp}</p>
+                    </div>
+                    <button className="rounded-xl border border-amber-200/30 bg-amber-200/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-amber-50" onClick={props.generateFeedback} disabled={props.isBusy} type="button">
+                      {props.t.regenerateScorecard}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <textarea
-                className="min-h-[500px] flex-1 resize-none border-0 bg-transparent p-5 text-sm leading-7 text-white/80 outline-none placeholder:text-white/25"
+                className={`min-h-[500px] flex-1 resize-none border-0 bg-transparent p-5 text-sm leading-7 text-white/80 outline-none placeholder:text-white/25 ${props.feedback.parseError ? 'pt-40' : ''}`}
                 value={props.feedback.content}
                 onChange={(event) => {
                   props.setCopied(false);
@@ -1063,11 +1177,22 @@ function HistoryView(props: HistoryProps) {
                           {new Date(review.updatedAt).toLocaleString()} · {review.providerSnapshot.llmProvider}/{review.providerSnapshot.llmModel}
                         </p>
                       </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white/65">{props.t.statuses[review.status]}</span>
+                        <span className="rounded-full border border-[var(--accent)]/30 bg-white/[0.04] px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white/75">Band {formatBand(review.overallBand ?? null)}</span>
+                      </div>
                       <div className="flex gap-2">
                         <button className="btn-ghost" onClick={() => props.onOpen(review.id)} type="button">{props.t.openReview}</button>
                         <button className="rounded-xl border border-rose-300/20 bg-rose-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-rose-100" onClick={() => props.onDelete(review.id)} type="button">{props.t.deleteReview}</button>
                       </div>
                     </div>
+                    <div className="mt-3 grid grid-cols-1 gap-2 text-[10px] font-bold uppercase tracking-widest text-white/35 md:grid-cols-2">
+                      <p className="truncate rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">ASR · {review.providerSnapshot.asrProvider}/{review.providerSnapshot.asrModel}</p>
+                      <p className="truncate rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">LLM · {review.providerSnapshot.llmProvider}/{review.providerSnapshot.llmModel}</p>
+                    </div>
+                    {review.lastErrorMessage ? (
+                      <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">{review.lastErrorMessage}</p>
+                    ) : null}
                     <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                       <p className="line-clamp-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-white/50">{review.transcriptPreview || props.t.pendingTranscription}</p>
                       <p className="line-clamp-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs leading-5 text-white/50">{review.feedbackPreview || props.t.feedbackPlaceholder}</p>
@@ -1127,6 +1252,8 @@ type SettingsProps = {
   handleLlmProviderChange: (provider: LlmProvider) => void;
   handleSettingsChange: (field: 'asrModel' | 'llmModel', value: string) => void;
   isTestingConnection: boolean;
+  lastProviderTest: ProviderDiagnosticResult | null;
+  providerDiagnostics: ProviderDiagnosticResult[];
   readiness: SettingsReadiness;
   settings: AppSettings;
   settingsReady: boolean;
@@ -1203,6 +1330,36 @@ function SettingsView(props: SettingsProps) {
             <div className="sm:col-span-2 grid grid-cols-1 gap-3 md:grid-cols-2">
               <ProviderStatus label={props.t.asrReady} missingLabel={props.t.asrMissing} ready={props.readiness.asr.ready} missing={props.readiness.asr.missing} configuredLabel={props.t.configured} />
               <ProviderStatus label={props.t.llmReady} missingLabel={props.t.llmMissing} ready={props.readiness.llm.ready} missing={props.readiness.llm.missing} configuredLabel={props.t.configured} />
+            </div>
+            <div className="sm:col-span-2 rounded-2xl border border-white/10 bg-black/15 p-4">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-[var(--accent)]">{props.t.diagnostics}</h3>
+                  <p className="mt-1 text-xs text-white/40">{props.t.diagnosticsHelp}</p>
+                </div>
+                {props.lastProviderTest ? (
+                  <span className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${props.lastProviderTest.ready ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-200'}`}>
+                    {props.t.lastConnectionTest}
+                  </span>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {props.providerDiagnostics.map((diagnostic) => (
+                  <DiagnosticCard key={`${diagnostic.capability}-${diagnostic.provider}`} diagnostic={diagnostic} />
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {visibleApiKeyProviders.map((provider) => (
+                  <span key={provider} className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${hasConfiguredProviderKey(props.settings, provider) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-200'}`}>
+                    {getProviderLabel(provider)} · {hasConfiguredProviderKey(props.settings, provider) ? props.t.keyConfigured : props.t.keyMissing}
+                  </span>
+                ))}
+              </div>
+              {props.lastProviderTest ? (
+                <p className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${props.lastProviderTest.ready ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-200' : 'border-amber-400/20 bg-amber-500/10 text-amber-100'}`}>
+                  {props.lastProviderTest.message}
+                </p>
+              ) : null}
             </div>
             <Field label={props.t.asrProvider}>
               <select className="glass-input" value={selectedAsrProvider} onChange={(event) => props.handleAsrProviderChange(event.target.value as AsrProvider)}>
@@ -1308,6 +1465,19 @@ function ProviderStatus({
         {ready ? label : missingLabel}
       </p>
       <p className="mt-1 truncate text-xs text-white/45">{ready ? configuredLabel : missing.join(', ')}</p>
+    </div>
+  );
+}
+
+function DiagnosticCard({ diagnostic }: { diagnostic: ProviderDiagnosticResult }) {
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${diagnostic.ready ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-amber-400/20 bg-amber-500/10'}`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className={`text-[10px] font-bold uppercase tracking-widest ${diagnostic.ready ? 'text-emerald-300' : 'text-amber-200'}`}>{diagnostic.capability}</p>
+        <span className="text-[9px] font-bold uppercase tracking-widest text-white/30">{diagnostic.ready ? 'Ready' : 'Missing'}</span>
+      </div>
+      <p className="mt-1 truncate text-xs font-semibold text-white/75">{diagnostic.provider} · {diagnostic.model}</p>
+      <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">{diagnostic.message}</p>
     </div>
   );
 }
